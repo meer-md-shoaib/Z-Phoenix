@@ -271,15 +271,17 @@ def audit_api():
     })
 
 if __name__ == '__main__':
-    port = 8080
+    import os
+    port = int(os.environ.get('PORT', 8080))
+    host = os.environ.get('HOST', '0.0.0.0')
     print("=" * 60)
     print("  Z-PHOENIX Frontend Local Preview Server")
-    print(f"  Available at: http://localhost:{port}")
+    print(f"  Available at: http://{host}:{port} (or http://localhost:{port})")
     print("  Press Ctrl+C to stop")
     print("=" * 60)
     try:
-        app.run(host='127.0.0.1', port=port, debug=True)
+        app.run(host=host, port=port, debug=True)
     except OSError:
         port = 5000
-        print(f"  Port 8080 busy, falling back to: http://localhost:{port}")
-        app.run(host='127.0.0.1', port=port, debug=True)
+        print(f"  Port 8080 busy, falling back to: http://{host}:{port}")
+        app.run(host=host, port=port, debug=True)
