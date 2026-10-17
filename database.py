@@ -22,7 +22,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import config
@@ -52,7 +52,7 @@ def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
 
 
 def _now() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "Z"
 
 
 # ---------------------------------------------------------------------------
@@ -458,3 +458,19 @@ def list_audit(limit: int = 200) -> List[Dict[str, Any]]:
             "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+if __name__ == "__main__":
+    init_db()
+    print("Z-Phoenix database initialized successfully.")
+    with connect() as conn:
+        tables = [
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        ]
+        print(f"Verified tables: {', '.join(tables)}")
+        for t in tables:
+            count = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            print(f"  - {t}: {count} row(s)")
+
