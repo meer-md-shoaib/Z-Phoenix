@@ -526,10 +526,16 @@ def api_diagnose():
         database.update_incident(incident_id, diagnosis=json.dumps(diagnosis))
     with _FLOW_LOCK:
         FLOW["diagnosis"] = diagnosis
+        if diagnosis.get("fault_type") == "NONE" or diagnosis.get("risk") == "LOW":
+            FLOW["proposal"] = None
+            FLOW["validation"] = None
+    if diagnosis.get("fault_type") == "NONE" or diagnosis.get("risk") == "LOW":
+        governance.clear_pending()
     _emit_agent("diagnosis", diagnosis)
-    _console("ai", f"[DIAGNOSIS] {diagnosis.get('root_cause')} "
-                   f"(source={diagnosis.get('source')})")
-    _set_stage(4, "done", f"Root cause identified (source: "
+    _console("ok" if diagnosis.get("risk") == "LOW" else "ai",
+             f"[DIAGNOSIS] {diagnosis.get('root_cause')} "
+             f"(source={diagnosis.get('source')})")
+    _set_stage(4, "done", f"Diagnosis complete (source: "
                           f"{diagnosis.get('source')})")
     return jsonify({"ok": True, "diagnosis": diagnosis,
                     "incident_id": incident_id})
@@ -538,10 +544,15 @@ def api_diagnose():
 @app.route("/api/propose", methods=["POST"])
 def api_propose():
     sample = engine.sample()
-    fault = sample.get("fault") or "UNKNOWN"
     with _FLOW_LOCK:
         incident_id = FLOW["incident_id"]
+    if incident_id is None and sample.get("health") == "HEALTHY" and not sample.get("chaos_active"):
+        return _error("System is healthy with no active incident; recovery proposal not permitted.", 400)
+    fault = sample.get("fault") or "UNKNOWN"
+    with _FLOW_LOCK:
         diagnosis = FLOW["diagnosis"] or agents.diagnose(sample, fault)
+    if diagnosis.get("fault_type") == "NONE" or str(diagnosis.get("risk", "")).upper() == "LOW":
+        return _error("Diagnosis indicates healthy baseline; no recovery proposal required.", 400)
     proposal = agents.recover(diagnosis, sample)
     try:
         governance.stage_proposal(proposal, incident_id)

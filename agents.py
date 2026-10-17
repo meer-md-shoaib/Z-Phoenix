@@ -146,6 +146,26 @@ def diagnose(snapshot: Dict[str, Any], fault_type: str = "UNKNOWN") -> Dict[str,
     Diagnose a telemetry snapshot. Always returns a structured payload;
     on any Granite failure it returns config.get_fallback('diagnosis', fault).
     """
+    norm_fault = str(fault_type or "").upper().strip()
+    if snapshot.get("health") == "HEALTHY" and norm_fault in ("", "NONE", "UNKNOWN"):
+        return {
+            "fault_type": "NONE",
+            "root_cause": "System operating normally within baseline thresholds; no anomaly detected.",
+            "confidence": 1.0,
+            "evidence": [
+                f"CPU utilisation healthy at {snapshot.get('cpu', 25.0)}% (<{config.THRESH_CPU_CRITICAL}%)",
+                f"Resident memory healthy at {snapshot.get('ram_gb', 2.1)} GB",
+                f"CICS throughput healthy at {snapshot.get('tps', 1000)} txn/s (>{config.THRESH_TPS_CRITICAL} txn/s)",
+                f"Db2 lock waits healthy at {snapshot.get('locks', 2)} (<{config.THRESH_LOCKS_CRITICAL})",
+            ],
+            "summary": "All telemetry gauges within normal operational envelope. No anomaly detected.",
+            "risk": "LOW",
+            "recommendation": "Maintain baseline operations; no recovery required.",
+            "engine": config.GRANITE_MODEL,
+            "source": "deterministic-health-check",
+            "reason": None,
+        }
+
     fallback = config.get_fallback("diagnosis", fault_type)
     if not config.api_key_present():
         return dict(fallback, reason="no_api_key_configured")
