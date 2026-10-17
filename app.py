@@ -327,13 +327,12 @@ def _open_incident(sample: Dict[str, Any], reasons: List[str]) -> None:
 
 
 def _resolve_incident(incident_id: int) -> None:
-    database.resolve_incident(incident_id)
     with _FLOW_LOCK:
+        pipeline = FLOW["pipeline"]
+        settled = pipeline in ("complete", "replayed")
         if FLOW["incident_id"] == incident_id:
             FLOW["incident_id"] = None
             FLOW["incident"] = None
-        pipeline = FLOW["pipeline"]
-        settled = pipeline in ("complete", "replayed")
         if settled:
             FLOW["message"] = "Recovered - validated playbook executed"
         else:
@@ -346,6 +345,12 @@ def _resolve_incident(incident_id: int) -> None:
                 "validation": None,
                 "message": "Metrics restored to baseline",
             })
+    # Only a completed, approved execution can establish successful recovery.
+    # A kill switch, timeout, or naturally cleared fault is merely closure.
+    if settled:
+        database.resolve_incident(incident_id)
+    else:
+        database.expire_incident(incident_id)
     if not settled:
         # The incident died without a validated recovery (kill switch or
         # 60 s auto-kill). Any staged proposal must not remain approvable,
@@ -355,11 +360,12 @@ def _resolve_incident(incident_id: int) -> None:
             governance.clear_pending()
             governance.log_audit("governance", "GATE_EXPIRED",
                                  f"incident#{incident_id}", "LOW",
-                                 {"reason": "incident resolved before approval"})
+                                 {"reason": "incident ended before recovery completed"})
     socketio.emit("incident_cleared", {"id": incident_id, "settled": settled})
     socketio.emit("stages", _flow_copy())
-    _console("ok", f"INCIDENT #{incident_id} RESOLVED - telemetry back inside "
-                   f"the recovery envelope.")
+    _console("ok" if settled else "warn",
+             f"INCIDENT #{incident_id} {'RESOLVED' if settled else 'EXPIRED'} - "
+             "telemetry back inside the recovery envelope.")
     if settled:
         socketio.start_background_task(_delayed_reset, 6)
 
@@ -379,7 +385,8 @@ def _route_incident(incident_id: int, sample: Dict[str, Any], fault: str) -> Non
     playbook = database.find_playbook_by_trigger(fault)
     repeat = database.has_resolved_incident(fault)
     if playbook is not None and repeat and \
-            str(playbook.get("validation_result", "")).upper() == "PASS":
+            str(playbook.get("validation_result", "")).upper() == "PASS" and \
+            bool(playbook.get("approved_by")):
         _fast_replay(incident_id, playbook)
     else:
         _ai_pipeline(incident_id, sample, fault)
@@ -387,7 +394,7 @@ def _route_incident(incident_id: int, sample: Dict[str, Any], fault: str) -> Non
 
 def _fast_replay(incident_id: int, playbook: Dict[str, Any]) -> None:
     with _FLOW_LOCK:
-        FLOW["pipeline"] = "replayed"
+        FLOW["pipeline"] = "replaying"
     _set_stage(4, "skipped", "Bypassing AI - validated playbook already exists")
     _set_stage(5, "skipped")
     _set_stage(6, "skipped")
@@ -406,6 +413,8 @@ def _fast_replay(incident_id: int, playbook: Dict[str, Any]) -> None:
         with _FLOW_LOCK:
             FLOW["pipeline"] = "rejected"
         return
+    with _FLOW_LOCK:
+        FLOW["pipeline"] = "replayed"
     _set_stage(8, "done", f"Replay complete in {result['elapsed_ms']} ms")
     _console("ok", f"FAST REPLAY COMPLETE in {result['elapsed_ms']} ms "
                    f"({result['steps_executed']} steps, AI bypassed).")

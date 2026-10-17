@@ -283,6 +283,16 @@ def resolve_incident(incident_id: int, diagnosis: Optional[str] = None) -> None:
         )
 
 
+def expire_incident(incident_id: int, diagnosis: Optional[str] = None) -> None:
+    """Close an incident that ended without a successfully executed recovery."""
+    update_incident(incident_id, diagnosis=diagnosis, status="EXPIRED")
+    with _WRITE_LOCK, connect() as conn:
+        conn.execute(
+            "UPDATE incidents SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL",
+            (_now(), incident_id),
+        )
+
+
 def get_incident(incident_id: int) -> Optional[Dict[str, Any]]:
     with connect() as conn:
         return _row_to_dict(
@@ -300,13 +310,27 @@ def get_active_incident() -> Optional[Dict[str, Any]]:
 
 
 def has_resolved_incident(trigger_signature: str) -> bool:
-    """True once this fault has been fully recovered before (enables fast replay)."""
+    """True only when a prior resolved incident has successful execution evidence.
+
+    Requiring the immutable execution audit also excludes incidents incorrectly
+    marked RESOLVED by older versions when a kill switch or timeout ended them.
+    """
     with connect() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM incidents WHERE fault_type = ? AND status = 'RESOLVED' LIMIT 1",
+        rows = conn.execute(
+            """SELECT i.id
+               FROM incidents AS i
+               WHERE i.fault_type = ? AND i.status = 'RESOLVED'
+               AND EXISTS (
+                   SELECT 1 FROM audit_log AS a
+                   WHERE a.action = 'EXECUTION_COMPLETED'
+                   AND json_valid(a.details_json)
+                   AND CAST(json_extract(a.details_json, '$.incident_id') AS INTEGER) = i.id
+                   AND json_extract(a.details_json, '$.result') = 'RECOVERED'
+               )
+               LIMIT 1""",
             (trigger_signature,),
         ).fetchone()
-    return row is not None
+    return rows is not None
 
 
 def list_incidents(limit: int = 100) -> List[Dict[str, Any]]:
