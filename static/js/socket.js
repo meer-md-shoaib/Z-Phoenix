@@ -15,6 +15,11 @@
 
   var Z = window.ZPhoenix = {
     connected: false,
+    connectionState: {
+      connected: false,
+      status: "connecting",
+      transport: "socket.io"
+    },
 
     /* ------------------------------------------------------------ events */
     on: function (event, fn) {
@@ -87,25 +92,62 @@
   };
 
   /* --------------------------------------------------------- transport */
+  var pollTimer = null;
+  var fallbackTimer = null;
+
+  function setConnectionState(state) {
+    Z.connected = !!state.connected;
+    Z.connectionState = state;
+    Z.fire("connection", state);
+  }
+
+  function pollTelemetry() {
+    Z.api("/api/telemetry").then(function (data) {
+      if (!Z.connected) {
+        setConnectionState({ connected: false, status: "polling", transport: "rest" });
+      }
+      Z.fire("telemetry", data);
+    }).catch(function () {
+      if (!Z.connected) {
+        setConnectionState({ connected: false, status: "offline", transport: "rest" });
+      }
+    });
+  }
+
+  function startPolling() {
+    if (pollTimer !== null) return;
+    setConnectionState({ connected: false, status: "polling", transport: "rest" });
+    pollTelemetry();
+    pollTimer = setInterval(pollTelemetry, 1000);
+  }
+
+  function stopPolling() {
+    if (pollTimer === null) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
   if (typeof io !== "undefined") {
     var socket = io({ transports: ["websocket", "polling"], reconnection: true });
     Z.socket = socket;
     SERVER_EVENTS.forEach(function (event) {
       socket.on(event, function (data) { Z.fire(event, data); });
     });
+    fallbackTimer = setTimeout(startPolling, 2500);
     socket.on("connect", function () {
-      Z.connected = true;
-      Z.fire("connection", { connected: true });
+      if (fallbackTimer !== null) clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+      stopPolling();
+      setConnectionState({ connected: true, status: "connected", transport: "socket.io" });
     });
     socket.on("disconnect", function () {
-      Z.connected = false;
-      Z.fire("connection", { connected: false });
+      if (fallbackTimer !== null) clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+      startPolling();
     });
+    socket.on("connect_error", startPolling);
   } else {
     /* Degraded mode: 1 Hz REST polling keeps the console alive. */
-    setInterval(function () {
-      Z.api("/api/telemetry").then(function (data) { Z.fire("telemetry", data); }).catch(function () {});
-    }, 1000);
-    Z.fire("connection", { connected: false, degraded: true });
+    startPolling();
   }
 })();

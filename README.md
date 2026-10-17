@@ -390,6 +390,7 @@ All responses are JSON. Errors use `{"ok": false, "error": "...", "status": <HTT
 ### Integration boundaries and limitations
 
 - Host CPU/RAM are observed where the platform probe is available. CICS TPS, Db2 lock counts, and fault responses are simulated; the API labels these sources explicitly.
+- The dashboard prefers Socket.IO and falls back to REST polling when the socket client is unavailable or disconnected. Its connection badge reports `LIVE SOCKET`, `REST POLLING`, or `OFFLINE` to match the active transport.
 - Chaos injection starts bounded local worker processes when enabled. It is disabled unless `Z_PHOENIX_ENABLE_CHAOS=true` is set.
 - Read-only GET routes are unauthenticated in this demo. Put them behind a trusted network boundary or authentication proxy before exposing the service beyond the local rehearsal environment. The emergency chaos stop stays available without a credential so an operator can always stop simulation workers.
 - Recovery playbook steps are simulated and audited. This backend does not invoke shell commands or execute AI-produced code.

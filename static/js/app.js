@@ -86,7 +86,7 @@
         health: sample.tps <= 150 ? "CRITICAL" : (sample.tps <= 600 ? "DEGRADED" : "HEALTHY"),
         max: 1200, accent: "#06B6D4" },
       { id: "kpiLocks", state: "kpiLocksState", dot: "kpiLocksDot", bar: "kpiLocksBar",
-        value: sample.locks, suffix: " waits", digits: 0,
+        value: sample.locks, suffix: Number(sample.locks) === 1 ? " wait" : " waits", digits: 0,
         health: sample.locks >= 300 ? "CRITICAL" : (sample.locks >= 50 ? "DEGRADED" : "HEALTHY"),
         max: 520, accent: "#F59E0B" }
     ];
@@ -372,6 +372,7 @@
         approvalRecorded = true;
         setGate("APPROVED", "Approval recorded. Sending the separate recovery request...");
         Z.toast("Approval recorded; recovery is a separate request.", "warn");
+        approvalContext = null;
         return Z.api("/api/recover", {
           method: "POST", body: requestBody, approvalToken: token
         });
@@ -389,7 +390,7 @@
         } else {
           setGate("APPROVAL FAILED", "No recovery request was sent.");
         }
-        disableGateButtons(false);
+        disableGateButtons(approvalRecorded);
         handleError(err, "Approval or recovery failed");
       });
   });
@@ -634,12 +635,26 @@
   bind("btnRefreshAudit", loadAudit);
 
   /* ------------------------------------------------- connection + clock */
-  Z.on("connection", function (state) {
+  function renderConnectionState(state) {
     var badge = $("connBadge");
     if (!badge) return;
-    badge.textContent = state.connected ? "LIVE SOCKET" : "OFFLINE";
-    badge.className = "badge " + (state.connected ? "badge-ok" : "badge-crit");
-  });
+    if (state.connected) {
+      badge.textContent = "LIVE SOCKET";
+      badge.className = "badge badge-ok";
+    } else if (state.status === "polling") {
+      badge.textContent = "REST POLLING";
+      badge.className = "badge badge-warn";
+    } else if (state.status === "offline") {
+      badge.textContent = "OFFLINE";
+      badge.className = "badge badge-crit";
+    } else {
+      badge.textContent = "CONNECTING";
+      badge.className = "badge badge-warn";
+    }
+  }
+
+  Z.on("connection", renderConnectionState);
+  renderConnectionState(Z.connectionState || { connected: Z.connected });
 
   setInterval(function () {
     setText("clock", Z.clockString());
