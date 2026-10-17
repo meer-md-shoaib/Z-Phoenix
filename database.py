@@ -309,11 +309,31 @@ def get_active_incident() -> Optional[Dict[str, Any]]:
         )
 
 
-def has_resolved_incident(trigger_signature: str) -> bool:
-    """True only when a prior resolved incident has successful execution evidence.
+def has_successful_recovery(incident_id: int) -> bool:
+    """Whether an incident has immutable evidence of a successful execution."""
+    with connect() as conn:
+        row = conn.execute(
+            """SELECT i.id
+               FROM incidents AS i
+               WHERE i.id = ? AND i.status = 'RESOLVED'
+               AND EXISTS (
+                   SELECT 1 FROM audit_log AS a
+                   WHERE a.action = 'EXECUTION_COMPLETED'
+                   AND json_valid(a.details_json)
+                   AND CAST(json_extract(a.details_json, '$.incident_id') AS INTEGER) = i.id
+                   AND json_extract(a.details_json, '$.result') = 'RECOVERED'
+               )
+               LIMIT 1""",
+            (incident_id,),
+        ).fetchone()
+    return row is not None
 
-    Requiring the immutable execution audit also excludes incidents incorrectly
-    marked RESOLVED by older versions when a kill switch or timeout ended them.
+
+def has_resolved_incident(trigger_signature: str) -> bool:
+    """True only when this fault has prior successful execution evidence.
+
+    This excludes incidents incorrectly marked RESOLVED by older versions
+    when a kill switch or timeout ended them.
     """
     with connect() as conn:
         rows = conn.execute(

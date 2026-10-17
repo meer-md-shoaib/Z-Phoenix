@@ -1051,7 +1051,12 @@ def api_recovery_passport(passport_id: int):
     snapshot_event = next((row for row in audit_rows
                            if row["action"] == "RECOVERY_SNAPSHOTS_CAPTURED"), None)
     approved = next((row for row in audit_rows if row["action"] == "HUMAN_GATE_APPROVED"), None)
-    outcome = "recovered" if str(incident.get("status", "")).upper() == "RESOLVED" else "pending_or_unresolved"
+    outcome = (
+        "recovered"
+        if str(incident.get("status", "")).upper() == "RESOLVED"
+        and database.has_successful_recovery(passport_id)
+        else "pending_or_unresolved"
+    )
     playbook = database.find_playbook_by_trigger(incident.get("fault_type", ""))
     return jsonify({"ok": True, "passport": {
         "id": str(passport_id), "incident_id": passport_id,

@@ -216,7 +216,7 @@ RECOVERY_SYSTEM_PROMPT = (
     "STRICT JSON only: title (string), risk_tier ('LOW'|'MEDIUM'|'HIGH'), "
     "rationale (string), steps (array of {title, command, rationale}), "
     "estimated_duration_sec (number). Commands must use only these prefixes: "
-    + ", ".join(config.ALLOWED_COMMAND_PREFIXES)
+    + "\n".join(f"- {command}" for command in config.ALLOWED_COMMANDS)
 )
 
 

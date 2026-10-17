@@ -134,17 +134,19 @@ REPLAY_BUDGET_SEC = 2.0       # "1-Click Replay (~2s)"
 # ---------------------------------------------------------------------------
 # 8. Action allowlist / denylist (shared by Validation Agent + governance)
 # ---------------------------------------------------------------------------
-ALLOWED_COMMAND_PREFIXES: Tuple[str, ...] = (
-    "ps ",
-    "kill ",
-    "mod ",
-    "db2 ",
-    "systemctl ",
-    "service ",
-    "echo ",
-    "sleep ",
-    "ip ",
-    "chsys",
+# Exact templates only. Broad command prefixes (especially ``kill ``,
+# ``systemctl `` and ``ip ``) would let a proposal target unrelated host
+# processes or services if an execution adapter is connected later.
+ALLOWED_COMMANDS: Tuple[str, ...] = (
+    "ps -eo pid,pcpu,comm --sort=-pcpu | head -5",
+    "mod cbm -domain PROD -throttle 40",
+    "kill -9 <RUNAWAY_PID>",
+    "echo ZPHX-RECOVERY-OK",
+    "echo ZPHX-CPU-RECOVERY-OK",
+    "db2 force application (ALL)",
+    "db2 terminate",
+    "db2 update db cfg for ZPHXDB using LOCKTIMEOUT 30",
+    "systemctl restart db2units",
 )
 
 DENIED_COMMAND_PATTERNS: Tuple[str, ...] = (
@@ -165,18 +167,16 @@ RISK_LEVELS = ("LOW", "MEDIUM", "HIGH")
 
 
 def command_allowed(command: str) -> Tuple[bool, str]:
-    """Return (allowed, reason) for a proposed remediation command."""
+    """Allow only exact, reviewed remediation templates."""
     cmd = (command or "").strip()
     if not cmd:
         return False, "empty command"
-    lowered = cmd.lower()
     for pattern in DENIED_RE:
         if pattern.search(cmd):
             return False, f"matches denied destructive pattern: {pattern.pattern}"
-    for prefix in ALLOWED_COMMAND_PREFIXES:
-        if lowered == prefix.strip() or lowered.startswith(prefix):
-            return True, f"allowlisted prefix '{prefix.strip()}'"
-    return False, f"command prefix not in allowlist: {cmd.split()[0]!r}"
+    if cmd not in ALLOWED_COMMANDS:
+        return False, "command does not exactly match a reviewed remediation template"
+    return True, "exact reviewed command template"
 
 
 # ---------------------------------------------------------------------------
