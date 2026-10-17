@@ -5,6 +5,14 @@
 
 {% block content %}
 <section class="panel">
+  <div class="gate" style="margin-top:0;margin-bottom:16px">
+    <div class="gate-head">Operator Authorization</div>
+    <label class="kv" for="approvalToken">Configured operator token</label>
+    <input id="approvalToken" type="password" autocomplete="off" spellcheck="false"
+      aria-label="Configured operator token" placeholder="Enter token for this page session">
+    <p>Used only in the authorization header for 1-Click Replay.</p>
+  </div>
+
   <div class="panel-head">
     <h2>Verified Playbooks <span class="chip chip-cyan">FAST REPLAY ≈ 2s</span></h2>
     <div class="btn-row">

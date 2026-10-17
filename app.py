@@ -118,7 +118,25 @@ FLOW: Dict[str, Any] = {
 
 def _flow_copy() -> Dict[str, Any]:
     with _FLOW_LOCK:
-        return json.loads(json.dumps(FLOW))
+        snapshot = json.loads(json.dumps(FLOW))
+    incident_id = snapshot.get("incident_id")
+    proposal = snapshot.get("proposal")
+    validation = snapshot.get("validation") or {}
+    gate_ready = any(stage.get("id") == 7 and stage.get("status") == "gate"
+                     for stage in snapshot.get("stages", []))
+    if (gate_ready
+            and incident_id is not None
+            and isinstance(proposal, dict)
+            and str(validation.get("result", "")).upper() == "PASS"):
+        bound_proposal = dict(proposal)
+        bound_proposal["validation_result"] = "PASS"
+        snapshot["approval_context"] = {
+            "incident_id": incident_id,
+            "approval_id": WorkflowService.approval_id(incident_id, bound_proposal),
+        }
+    else:
+        snapshot["approval_context"] = None
+    return snapshot
 
 
 def _set_stage(stage_id: int, status: str, message: Optional[str] = None) -> None:

@@ -16,6 +16,30 @@ The token is shared across operators. `actor` is an audit label supplied by
 the client, not verified identity; use an identity-aware proxy or SSO before
 relying on individual attribution.
 
+Chaos injection also requires `Z_PHOENIX_ENABLE_CHAOS=1` (or `true` / `yes`)
+on the server, in addition to the approval token. The Chaos Lab and Playbook
+Library each provide a page-session password field; the browser sends the
+value only in the `X-Z-Phoenix-Approval-Token` header and does not persist it.
+
+The Playbook Library's 1-Click Replay uses the authenticated legacy route
+`POST /api/replay/{playbook_ref}` and sends an `actor` label. This is distinct
+from `POST /api/replay`, which is a side-effect-free safe-simulation endpoint.
+
+## Automatically validated incidents
+
+When the backend detects, proposes, and validates an incident automatically,
+the frontend receives the current `approval_context` inside the flow snapshot
+on `stages` events and telemetry updates:
+
+```json
+{"approval_context":{"incident_id":42,"approval_id":"<plan-bound ID>"}}
+```
+
+The context is present only while the current incident is at the human gate
+with a passing validation. It contains no credential. The frontend uses it to
+send the same separate approve-then-recover requests described below; the
+backend still checks the current incident, plan, token, and single-use grant.
+
 ## Sequence
 
 1. Run diagnosis, propose a recovery, then call `POST /api/validate`.

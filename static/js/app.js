@@ -150,7 +150,14 @@
   /* -------------------------------------------------------------- stepper */
   function renderStages(flow) {
     var host = $("stepper");
-    if (!host || !flow || !flow.stages) return;
+    if (!flow || !flow.stages) return;
+    var gate = flow.stages.filter(function (s) { return s.id === 7; })[0];
+    var context = flow.approval_context;
+    approvalContext = gate && gate.status === "gate" && context
+      && context.approval_id && context.incident_id != null
+      ? { approval_id: context.approval_id, incident_id: context.incident_id }
+      : null;
+    if (!host) return;
     host.innerHTML = "";
     flow.stages.forEach(function (stage) {
       var li = document.createElement("li");
@@ -449,8 +456,17 @@
   }
 
   bind("btnInject", function () {
+    var token = approvalToken();
+    if (!token) {
+      handleError(new Error("Enter the configured operator token first."), "Injection failed");
+      return;
+    }
     var intensity = slider ? parseInt(slider.value, 10) : 60;
-    Z.api("/api/chaos/inject", { method: "POST", body: { fault_type: chosenFault, intensity: intensity } })
+    Z.api("/api/chaos/inject", {
+      method: "POST",
+      body: { fault_type: chosenFault, intensity: intensity },
+      approvalToken: token
+    })
       .then(function (data) {
         Z.toast(data.chaos.message, "warn");
       })
@@ -537,10 +553,19 @@
       replay.className = "btn btn-sm";
       replay.textContent = "[1-Click Replay (~2s)]";
       replay.addEventListener("click", function () {
+        var token = approvalToken();
+        if (!token) {
+          handleError(new Error("Enter the configured operator token first."), "Replay failed");
+          return;
+        }
         replay.disabled = true;
         replay.textContent = "[REPLAYING...]";
         var started = performance.now();
-        Z.api("/api/replay/" + pb.id, { method: "POST", body: {} })
+        Z.api("/api/replay/" + encodeURIComponent(pb.id), {
+          method: "POST",
+          body: { actor: "sre.oncall" },
+          approvalToken: token
+        })
           .then(function (data) {
             replay.textContent = "[REPLAYED " + data.elapsed_ms + "ms]";
             Z.toast("Replay " + data.playbook_id + " v" + data.playbook_version
