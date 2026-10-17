@@ -115,6 +115,17 @@ def init_db(db_path: Optional[Path | str] = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_recovery_incident ON recovery_history(incident_id);
         """)
 
+        # Non-destructive schema migration for pre-existing databases
+        playbook_cols = {row["name"] for row in conn.execute("PRAGMA table_info(playbooks)").fetchall()}
+        if "description" not in playbook_cols:
+            conn.execute("ALTER TABLE playbooks ADD COLUMN description TEXT DEFAULT ''")
+        if "parameters_json" not in playbook_cols:
+            conn.execute("ALTER TABLE playbooks ADD COLUMN parameters_json TEXT DEFAULT '{}'")
+
+        approval_cols = {row["name"] for row in conn.execute("PRAGMA table_info(approvals)").fetchall()}
+        if "reason" not in approval_cols:
+            conn.execute("ALTER TABLE approvals ADD COLUMN reason TEXT")
+
         conn.commit()
 
         tables = conn.execute("""
