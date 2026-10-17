@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Command Center · Z-PHOENIX{% endblock %}
+{% block page_title %}Command Center{% endblock %}
+{% block crumb %}Golden path: baseline → chaos → detection → AI → human gate → recovery{% endblock %}
+
+{% block content %}
+<div id="incidentBanner" class="incident-banner hidden">
+  <span class="pulse-dot"></span>
+  <strong>ACTIVE INCIDENT</strong>
+  <span id="incidentText">—</span>
+  <span id="incidentId" class="mono right">—</span>
+</div>
+
+<section class="kpi-grid">
+  <article class="kpi" style="--accent:#10B981">
+    <header><span>CPU Utilisation</span><span class="kpi-unit">%</span></header>
+    <div class="kpi-value" id="kpiCpu">25.0%</div>
+    <div class="kpi-foot"><span class="dot ok" id="kpiCpuDot"></span><span id="kpiCpuState">HEALTHY</span></div>
+    <div class="kpi-bar"><div id="kpiCpuBar" style="width:25%"></div></div>
+  </article>
+
+  <article class="kpi" style="--accent:#10B981">
+    <header><span>Resident Memory</span><span class="kpi-unit">GB</span></header>
+    <div class="kpi-value" id="kpiRam">2.10 GB</div>
+    <div class="kpi-foot"><span class="dot ok" id="kpiRamDot"></span><span id="kpiRamState">HEALTHY</span></div>
+    <div class="kpi-bar"><div id="kpiRamBar" style="width:13%"></div></div>
+  </article>
+
+  <article class="kpi" style="--accent:#06B6D4">
+    <header><span>CICS Throughput</span><span class="kpi-unit">txn/s</span></header>
+    <div class="kpi-value" id="kpiTps">1000 txn/s</div>
+    <div class="kpi-foot"><span class="dot ok" id="kpiTpsDot"></span><span id="kpiTpsState">HEALTHY</span></div>
+    <div class="kpi-bar"><div id="kpiTpsBar" style="width:83%"></div></div>
+  </article>
+
+  <article class="kpi" style="--accent:#F59E0B">
+    <header><span>Db2 Lock Waits</span><span class="kpi-unit">waits</span></header>
+    <div class="kpi-value" id="kpiLocks">2</div>
+    <div class="kpi-foot"><span class="dot ok" id="kpiLocksDot"></span><span id="kpiLocksState">HEALTHY</span></div>
+    <div class="kpi-bar"><div id="kpiLocksBar" style="width:2%"></div></div>
+  </article>
+</section>
+
+<div class="panel-grid">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Live Telemetry <span class="chip chip-cyan">1 Hz STREAM</span></h2>
+      <span class="footer-note">Red CPU % (left axis) vs Cyan CICS TPS (right axis) · Orange dashes = Db2 lock waits</span>
+    </div>
+    <div class="chart-wrap"><canvas id="telemetryChart"></canvas></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Golden Path Stepper</h2>
+      <span class="chip chip-gold" id="pipelineState">IDLE</span>
+    </div>
+    <ol id="stepper" class="stepper"></ol>
+    <p class="note" id="flowMessage" style="margin-top:12px">Baseline healthy - 1 Hz stream active</p>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>AI Agent Console <span class="chip chip-purple">IBM GRANITE 3.0 8B</span></h2>
+    <div class="btn-row">
+      <button id="btnDiagnose" class="btn">1 · RUN DIAGNOSIS</button>
+      <button id="btnPropose" class="btn">2 · DRAFT PROPOSAL</button>
+      <button id="btnValidate" class="btn">3 · SANDBOX VALIDATE</button>
+      <button id="btnExecuteDirect" class="btn btn-ghost" title="Server must answer HTTP 403">ATTEMPT DIRECT EXECUTION</button>
+    </div>
+  </div>
+
+  <div id="consoleLog" class="console-log">
+    <div class="console-line ok"><span class="ts">[--:--:--]</span><span class="msg">Z-PHOENIX console ready. Telemetry stream starting…</span></div>
+  </div>
+
+  <div class="agent-grid">
+    <div class="agent-block diagnosis" id="diagBlock">
+      <h3>Diagnosis Agent <span><span class="badge badge-ai" id="diagSource">IDLE</span> <span class="badge" id="diagConfidence">CONF –</span></span></h3>
+      <p class="kv"><b>Root cause:</b> <span id="diagRootCause" class="empty">awaiting telemetry breach…</span></p>
+      <pre class="json-out" id="diagOut">{
+  "status": "idle",
+  "note": "run the diagnosis agent or wait for automatic detection"
+}</pre>
+      <p class="kv" style="margin-top:8px"><b>Evidence</b></p>
+      <pre class="json-out" id="diagEvidence">—</pre>
+    </div>
+
+    <div class="agent-block proposal" id="propBlock">
+      <h3>Recovery Agent <span><span class="badge badge-gate" id="propRisk">RISK –</span></span></h3>
+      <p class="kv"><b>Proposal:</b> <span id="propTitle" class="empty">proposal-only - nothing executes without the human gate</span></p>
+      <ol id="propSteps" class="steps-list"></ol>
+      <pre class="json-out" id="propOut" style="margin-top:10px">{
+  "status": "idle"
+}</pre>
+    </div>
+
+    <div class="agent-block validation" id="valBlock">
+      <h3>Validation Agent <span class="badge" id="valBadge">IDLE</span></h3>
+      <p class="kv" id="valSummary">Sandbox-only simulation · no host state is ever mutated</p>
+      <pre class="json-out" id="valOut">{
+  "status": "idle"
+}</pre>
+    </div>
+  </div>
+
+  <div class="gate" id="gatePanel">
+    <div class="gate-head">Human Approval Gate · Bounded Autonomy</div>
+    <p>
+      The AI can diagnose, propose and validate — it can never execute.
+      Direct execution without an operator decision is rejected with
+      <code>HTTP 403</code>. Approving clears the chaos fault, restores the
+      metrics and stores the fix as playbook <code>v(N+1)</code>.
+    </p>
+    <div class="row">
+      <span class="badge badge-gate" id="gateState">IDLE</span>
+      <span class="footer-note" id="gateDetail">No proposal is waiting at the gate.</span>
+      <div class="btn-row right">
+        <button id="btnApprove" class="btn btn-gate" disabled>[APPROVE]</button>
+        <button id="btnReject" class="btn btn-ghost" disabled>[REJECT]</button>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

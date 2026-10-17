@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Chaos Lab · Z-PHOENIX{% endblock %}
+{% block page_title %}Chaos Lab{% endblock %}
+{% block crumb %}Bounded fault injection with hard safety caps{% endblock %}
+
+{% block content %}
+<div id="labBanner" class="incident-banner hidden">
+  <span class="pulse-dot"></span>
+  <strong>FAULT INJECTION ACTIVE</strong>
+  <span>bounded workers · 60s auto-kill · instant emergency stop</span>
+</div>
+
+<section class="fault-grid">
+  <article class="fault-card">
+    <h3>CPU Runaway Job</h3>
+    <p>
+      A runaway unit of work pins the CBM online domain. Real burner processes
+      drive host CPU up while the simulated LPAR gauges spike past the critical
+      thresholds: CPU &gt; 90%, TPS &lt; 150, Db2 lock waits &gt; 300.
+    </p>
+    <span class="badge badge-crit">CPU_RUNAWAY</span>
+    <div class="btn-row" style="margin-top:14px">
+      <button id="btnFaultCpu" class="btn" data-fault="CPU_RUNAWAY">SELECT</button>
+    </div>
+  </article>
+
+  <article class="fault-card">
+    <h3>Db2 Lock Contention</h3>
+    <p>
+      An uncommitted unit of work pins an exclusive page lock. Lock waits surge
+      past 300, transaction throughput collapses below 150 txn/s and the lock
+      manager saturates CPU — without crashing the host.
+    </p>
+    <span class="badge badge-warn">DB2_LOCK_CONTENTION</span>
+    <div class="btn-row" style="margin-top:14px">
+      <button id="btnFaultDb2" class="btn" data-fault="DB2_LOCK_CONTENTION">SELECT</button>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Injection Controls</h2>
+    <span class="chip chip-gold">SELECTED: <span id="selectedFault">CPU_RUNAWAY</span></span>
+  </div>
+
+  <div class="slider-row">
+    <label for="intensity">Intensity</label>
+    <input type="range" id="intensity" min="10" max="100" step="5" value="60">
+    <span class="slider-val" id="intensityVal">60%</span>
+  </div>
+
+  <div class="btn-row" style="margin-top:14px">
+    <button id="btnInject" class="btn btn-danger">[ INJECT BOUNDED FAULT ]</button>
+  </div>
+
+  <div class="readout" style="margin-top:18px">
+    <div>Chaos state <b id="labState">IDLE</b></div>
+    <div>Active fault <b id="labFault">NONE</b></div>
+    <div>Workers (cap 4) <b id="labWorkers">0 / 4</b></div>
+    <div>Elapsed / cap <b id="labElapsed">0s / 60s</b></div>
+    <div>Auto-kill in <b id="labAutoKill">-</b></div>
+    <div>Live CPU / TPS / Locks <b><span id="labCpu">25.0%</span> · <span id="labTps">1000 txn/s</span> · <span id="labLocks">2</span></b></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 style="color:#EF4444">Emergency Kill Switch</h2>
+    <span class="badge badge-crit">SAFETY</span>
+  </div>
+  <button id="btnKill" class="btn btn-kill">⚠ EMERGENCY KILL SWITCH ⚠</button>
+  <p class="note" style="margin-top:14px">
+    Terminates every burner process immediately, clears the fault from the
+    telemetry engine and restores the healthy baseline. Safety envelope:
+    max 4 worker processes, max 100% intensity, 60 second hard auto-kill,
+    duty-cycled burn loops so the host always stays schedulable.
+  </p>
+</section>
+{% endblock %}
