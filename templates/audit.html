@@ -1,0 +1,98 @@
+﻿{% extends "base.html" %}
+{% block title %}Audit Log{% endblock %}
+{% block topbar_title %}Audit Log{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">🗒️ Audit Log</h1>
+      <p class="page-subtitle">Immutable, timestamped record of every AI and human action. Read-only.</p>
+    </div>
+    <div class="d-flex align-center gap-3">
+      <button class="btn btn-ghost" id="btnRefreshAudit" aria-label="Refresh audit log">↻ Refresh</button>
+    </div>
+  </div>
+</div>
+
+<!-- Filter toolbar -->
+<div class="filter-toolbar" role="search" aria-label="Filter audit events">
+  <div class="form-group">
+    <label class="form-label" for="filterActor">Actor</label>
+    <select class="form-control" id="filterActor" aria-label="Filter by actor">
+      <option value="">All actors</option>
+      <option value="system">System</option>
+      <option value="user">User</option>
+      <option value="agent">Agent</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label" for="filterAction">Action Type</label>
+    <select class="form-control" id="filterAction" aria-label="Filter by action type">
+      <option value="">All actions</option>
+      <option value="chaos">Chaos</option>
+      <option value="anomaly">Anomaly</option>
+      <option value="diagnosis">Diagnosis</option>
+      <option value="recovery">Recovery</option>
+      <option value="playbook">Playbook</option>
+      <option value="approval">Approval</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label" for="filterRisk">Risk Level</label>
+    <select class="form-control" id="filterRisk" aria-label="Filter by risk level">
+      <option value="">All risk levels</option>
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+    </select>
+  </div>
+  <div class="form-group" style="align-self:flex-end;">
+    <button class="btn btn-ghost" id="btnClearFilters" aria-label="Clear all filters">× Clear</button>
+  </div>
+</div>
+
+<!-- Audit list -->
+<div class="card" id="auditCard">
+  <div class="card-header">
+    <span class="card-title">Events</span>
+    <span class="pill pill-muted pill-no-dot" id="auditCountPill">—</span>
+  </div>
+
+  <!-- Column header (accessible table-like layout) -->
+  <div class="audit-row" style="background:var(--clr-bg-card-alt);border-bottom:2px solid var(--clr-border);" role="rowheader">
+    <span class="audit-ts" style="color:var(--clr-text-muted);font-weight:600;">Timestamp</span>
+    <span class="audit-actor" style="color:var(--clr-text-muted);font-weight:600;">Actor</span>
+    <span class="audit-action" style="color:var(--clr-text-muted);font-weight:600;">Action</span>
+    <span class="audit-target" style="color:var(--clr-text-muted);font-weight:600;">Target / Details</span>
+    <span class="audit-risk" style="color:var(--clr-text-muted);font-weight:600;">Risk</span>
+  </div>
+
+  <div id="auditListEl" role="log" aria-live="polite" aria-label="Audit events"></div>
+
+  <div class="state-loading" id="auditLoading" style="padding:var(--sp-8);">
+    <span class="spinner"></span>
+    <span class="state-title">Loading audit events…</span>
+  </div>
+  <div class="state-empty" id="auditEmpty" style="display:none;">
+    <div class="state-icon" aria-hidden="true">📭</div>
+    <div class="state-title">No Audit Events</div>
+    <div class="state-desc">Events will appear here as the system runs.</div>
+  </div>
+  <div class="state-error" id="auditError" style="display:none;">
+    <div class="state-icon" aria-hidden="true">✕</div>
+    <div class="state-title">Load Failed</div>
+    <div class="state-desc" id="auditErrorMsg">Backend unavailable. Demo events shown.</div>
+    <button class="btn btn-ghost mt-3" id="btnRetryAudit">Retry</button>
+  </div>
+
+  <div class="card-footer d-flex justify-between">
+    <span class="text-xs text-muted">Audit events are read-only. No editing or deletion is permitted.</span>
+    <span class="last-updated" id="auditLastUpdated">—</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', filename='js/audit.js') }}"></script>
+{% endblock %}

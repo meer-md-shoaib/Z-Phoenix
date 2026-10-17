@@ -1,0 +1,149 @@
+﻿{% extends "base.html" %}
+{% block title %}Command Center{% endblock %}
+{% block topbar_title %}Command Center{% endblock %}
+
+{% block content %}
+<!-- Incident Alert Banner (hidden when healthy) -->
+<div class="alert-banner alert-critical" id="incidentBanner" style="display:none;" role="alert" aria-live="assertive">
+  <span aria-hidden="true">🚨</span>
+  <span class="alert-banner-text" id="incidentBannerText">Incident detected — AI diagnosis in progress.</span>
+  <span class="alert-banner-time" id="incidentBannerTime"></span>
+  <a class="btn btn-sm btn-ghost" href="{{ url_for('agents') }}">View AI Agents →</a>
+</div>
+
+<!-- ── KPI Cards ── -->
+<div class="kpi-grid">
+  <!-- CPU -->
+  <div class="kpi-card kpi-info" id="kpiCpu" role="region" aria-label="CPU Load">
+    <div class="kpi-label">
+      HOST CPU <span class="kpi-badge badge-host">HOST METRIC</span>
+    </div>
+    <div class="kpi-value" id="valCpu">—<span class="kpi-unit">%</span></div>
+    <div class="kpi-meta" id="metaCpu">Waiting for data…</div>
+    <div class="kpi-icon" aria-hidden="true">💻</div>
+  </div>
+
+  <!-- RAM -->
+  <div class="kpi-card kpi-info" id="kpiRam" role="region" aria-label="RAM Usage">
+    <div class="kpi-label">
+      HOST RAM <span class="kpi-badge badge-host">HOST METRIC</span>
+    </div>
+    <div class="kpi-value" id="valRam">—<span class="kpi-unit">GB</span></div>
+    <div class="kpi-meta" id="metaRam">Waiting for data…</div>
+    <div class="kpi-icon" aria-hidden="true">🧠</div>
+  </div>
+
+  <!-- TPS (simulated) -->
+  <div class="kpi-card kpi-ai" id="kpiTps" role="region" aria-label="Transactions per Second">
+    <div class="kpi-label">
+      SIMULATED TPS <span class="kpi-badge badge-sim">SIMULATED</span>
+    </div>
+    <div class="kpi-value" id="valTps">—<span class="kpi-unit">tx/s</span></div>
+    <div class="kpi-meta" id="metaTps">CICS workload simulation</div>
+    <div class="kpi-icon" aria-hidden="true">⚡</div>
+  </div>
+
+  <!-- Db2 Locks (simulated) -->
+  <div class="kpi-card kpi-warning" id="kpiLocks" role="region" aria-label="Db2 Lock Waits">
+    <div class="kpi-label">
+      SIMULATED DB2 LOCKS <span class="kpi-badge badge-sim">SIMULATED</span>
+    </div>
+    <div class="kpi-value" id="valLocks">—</div>
+    <div class="kpi-meta" id="metaLocks">Db2 lock contention simulation</div>
+    <div class="kpi-icon" aria-hidden="true">🔒</div>
+  </div>
+</div>
+
+<!-- ── Charts + Timeline ── -->
+<div class="grid-2 mb-6">
+
+  <!-- Live telemetry chart -->
+  <div class="card" style="grid-column:1/3;" role="region" aria-label="Live Telemetry Chart">
+    <div class="card-header">
+      <span class="card-title">Live Telemetry</span>
+      <div style="display:flex;align-items:center;gap:var(--sp-3);">
+        <span class="sim-label" title="CICS/Db2 TPS and lock values are simulated workload data, not live mainframe production metrics">⚠ TPS &amp; Locks are SIMULATED</span>
+        <span id="chartDemoLabel" class="demo-label" style="display:none;">DEMO DATA</span>
+        <button class="btn btn-ghost btn-sm" id="btnRefreshChart" aria-label="Manually refresh chart data">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="chart-legend">
+      <div class="chart-legend-item">
+        <div class="chart-legend-dot" style="background:#ef4444;"></div>
+        <span>CPU % (host)</span>
+      </div>
+      <div class="chart-legend-item">
+        <div class="chart-legend-dot" style="background:#38bdf8;"></div>
+        <span>TPS (simulated)</span>
+      </div>
+    </div>
+    <div class="chart-container" style="padding-top:0;">
+      <div class="chart-canvas-wrap" style="height:280px;">
+        <canvas id="telemetryChart" aria-label="CPU and TPS over time" role="img"></canvas>
+      </div>
+    </div>
+    <div class="card-footer d-flex justify-between">
+      <span id="chartWindowLabel">Last 60 seconds</span>
+      <span id="chartLastTs" class="last-updated">—</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <!-- Incident timeline -->
+  <div class="card" role="region" aria-label="Recent Event Timeline">
+    <div class="card-header">
+      <span class="card-title">Recent Events</span>
+      <span class="pill pill-info pill-no-dot" id="eventCount">0 events</span>
+    </div>
+    <div class="card-body" style="padding:0;">
+      <div id="timelineContainer" style="padding:var(--sp-4);">
+        <div class="state-loading">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="state-title">Loading events…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Golden Path status -->
+  <div class="card" role="region" aria-label="Golden Path Status">
+    <div class="card-header">
+      <span class="card-title">Golden Path</span>
+      <span class="pill pill-muted pill-no-dot" id="goldenPathStage">Baseline</span>
+    </div>
+    <div class="card-body" style="padding:var(--sp-4);">
+      <div id="goldenPathSteps">
+        {% set stages = [
+          ('1','Baseline','Healthy telemetry streaming.','dot-healthy'),
+          ('2','Chaos Inject','Fault injected via Chaos Lab.','dot-critical'),
+          ('3','Detect','Threshold breach detected.','dot-warning'),
+          ('4','Diagnose','Granite AI root-cause analysis.','dot-ai'),
+          ('5','Validate','Sandbox replay of proposed fix.','dot-info'),
+          ('6','Approve','Human-in-the-loop approval gate.','dot-approval'),
+          ('7','Recover','Allowlisted recovery executed.','dot-healthy'),
+          ('8','Replay','Playbook saved; future replay ~2s.','dot-info'),
+        ] %}
+        <div class="timeline" id="goldenPathTimeline">
+          {% for num, name, desc, cls in stages %}
+          <div class="timeline-item" id="gp-stage-{{ num }}">
+            <div class="timeline-dot {{ cls }}" style="opacity:0.3;" id="gp-dot-{{ num }}">{{ num }}</div>
+            <div class="timeline-content">
+              <div class="timeline-title" id="gp-label-{{ num }}">{{ name }}</div>
+              <div class="timeline-ts">{{ desc }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">
+      Golden Path: Baseline → Fault → Diagnose → Validate → Approve → Recover → Replay
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

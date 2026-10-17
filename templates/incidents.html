@@ -1,0 +1,68 @@
+﻿{% extends "base.html" %}
+{% block title %}Incidents{% endblock %}
+{% block topbar_title %}Incidents & Recovery Passport{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">🚨 Incidents &amp; Recovery Passport</h1>
+      <p class="page-subtitle">Incident history, lifecycle details, and before/during/after telemetry snapshots.</p>
+    </div>
+    <div class="d-flex align-center gap-3">
+      <button class="btn btn-ghost" id="btnRefreshIncidents" aria-label="Refresh incident list">↻ Refresh</button>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <!-- Incident list -->
+  <div>
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="card-title">Incident History</span>
+        <span class="pill pill-muted pill-no-dot" id="incidentCountPill">0 incidents</span>
+      </div>
+      <div id="incidentListArea" style="padding:0;">
+        <div class="state-loading" id="incidentListLoading">
+          <span class="spinner"></span>
+          <span class="state-title">Loading incidents…</span>
+        </div>
+        <div id="incidentListEl" class="incident-list" style="display:none;padding:var(--sp-4);"></div>
+        <div class="state-empty" id="incidentListEmpty" style="display:none;">
+          <div class="state-icon" aria-hidden="true">🟢</div>
+          <div class="state-title">No Incidents</div>
+          <div class="state-desc">No incidents recorded yet. Run the Golden Path to generate one.</div>
+        </div>
+        <div class="state-error" id="incidentListError" style="display:none;">
+          <div class="state-icon" aria-hidden="true">✕</div>
+          <div class="state-title">Load Failed</div>
+          <div class="state-desc" id="incidentListErrorMsg">Backend unavailable. Demo data shown.</div>
+          <button class="btn btn-ghost mt-3" id="btnRetryIncidents">Retry</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incident detail / Recovery Passport -->
+  <div>
+    <div class="card" id="passportCard">
+      <div class="card-header">
+        <span class="card-title">Recovery Passport</span>
+        <span class="pill pill-muted pill-no-dot" id="passportIdPill">Select an incident</span>
+      </div>
+      <div id="passportContent">
+        <div class="state-empty" style="padding:var(--sp-10) var(--sp-4);">
+          <div class="state-icon" aria-hidden="true">📋</div>
+          <div class="state-title">No Incident Selected</div>
+          <div class="state-desc">Click an incident from the list to view its Recovery Passport.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', filename='js/incidents.js') }}"></script>
+{% endblock %}

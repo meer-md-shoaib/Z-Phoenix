@@ -1,0 +1,50 @@
+﻿{% extends "base.html" %}
+{% block title %}Playbook Library{% endblock %}
+{% block topbar_title %}Playbook Library{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">📚 Playbook Library</h1>
+      <p class="page-subtitle">Versioned, validated recovery playbooks. Replay skips AI diagnosis for ~2s recovery.</p>
+    </div>
+    <div class="d-flex align-center gap-3">
+      <button class="btn btn-ghost" id="btnRefreshPlaybooks" aria-label="Refresh playbook list">↻ Refresh</button>
+    </div>
+  </div>
+</div>
+
+<!-- Replay notice -->
+<div class="alert-banner alert-ai mb-6" role="note">
+  <span aria-hidden="true">ℹ</span>
+  <span class="alert-banner-text">
+    <strong>Replay</strong> uses a previously validated playbook matched to the current fault signature.
+    Governance rules and human approval still apply — replay does not bypass the approval gate.
+  </span>
+</div>
+
+<!-- Playbook list -->
+<div id="playbookContainer">
+  <div class="state-loading" id="playbookLoading">
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="state-title">Loading playbooks…</span>
+  </div>
+  <div id="playbookList" class="playbook-cards-grid" style="display:none;" role="list" aria-label="Playbook library"></div>
+  <div class="state-empty" id="playbookEmpty" style="display:none;">
+    <div class="state-icon" aria-hidden="true">📭</div>
+    <div class="state-title">No Playbooks Yet</div>
+    <div class="state-desc">Complete the Golden Path (Diagnose → Validate → Approve) to save your first playbook.</div>
+  </div>
+  <div class="state-error" id="playbookError" style="display:none;">
+    <div class="state-icon" aria-hidden="true">✕</div>
+    <div class="state-title">Could Not Load Playbooks</div>
+    <div class="state-desc" id="playbookErrorMsg">Backend unavailable. Showing demo data below.</div>
+    <button class="btn btn-ghost mt-3" id="btnRetryPlaybooks">Retry</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', filename='js/playbooks.js') }}"></script>
+{% endblock %}

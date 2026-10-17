@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}AI Agents{% endblock %}
+{% block topbar_title %}AI Agent Console{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">🤖 AI Agent Console</h1>
+      <p class="page-subtitle">IBM Granite-powered Diagnosis, Recovery, and Validation agents — with human-in-the-loop approval.</p>
+    </div>
+    <div class="d-flex align-center gap-3">
+      <span class="pill pill-ai" id="agentStatusPill">IDLE</span>
+      <button class="btn btn-ai" id="btnAnalyze" aria-label="Start AI diagnosis of current incident">
+        🔍 Diagnose Incident
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Fallback notice (shown when AI provider is unavailable) -->
+<div class="fallback-notice" id="fallbackNotice" style="display:none;" role="alert">
+  ⚠ AI provider unavailable — showing deterministic fallback response. Logic and governance flow remain fully functional.
+</div>
+
+<!-- Demo notice -->
+<div class="fallback-notice" id="demoNotice" style="display:none;" role="note">
+  ⚠ DEMO MODE — results below are illustrative. Connect to backend for real Granite AI output.
+</div>
+
+<!-- ── Diagnosis Section ── -->
+<div class="agent-section" id="sectionDiagnosis">
+  <div class="agent-section-header">
+    <span class="agent-section-icon" aria-hidden="true">🔬</span>
+    <span class="agent-section-title">1 · Diagnosis Agent</span>
+    <span class="pill pill-muted pill-no-dot" id="diagnosisPill">Awaiting incident</span>
+  </div>
+  <div class="agent-section-body" id="diagnosisBody">
+    <div class="state-empty" style="padding:var(--sp-8) var(--sp-4);">
+      <div class="state-icon" aria-hidden="true">🔬</div>
+      <div class="state-title">No Diagnosis Yet</div>
+      <div class="state-desc">Click "Diagnose Incident" when an incident is active to start Granite analysis.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Recovery Section ── -->
+<div class="agent-section" id="sectionRecovery" style="opacity:0.4;pointer-events:none;">
+  <div class="agent-section-header">
+    <span class="agent-section-icon" aria-hidden="true">🛠</span>
+    <span class="agent-section-title">2 · Recovery Agent — Proposed Actions</span>
+    <span class="pill pill-muted pill-no-dot" id="recoveryPill">Awaiting diagnosis</span>
+  </div>
+  <div class="agent-section-body" id="recoveryBody">
+    <div class="state-empty" style="padding:var(--sp-8) var(--sp-4);">
+      <div class="state-icon" aria-hidden="true">🛠</div>
+      <div class="state-title">Recovery Not Yet Proposed</div>
+      <div class="state-desc">The Recovery Agent will propose scripted actions after diagnosis completes.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Validation Section ── -->
+<div class="agent-section" id="sectionValidation" style="opacity:0.4;pointer-events:none;">
+  <div class="agent-section-header">
+    <span class="agent-section-icon" aria-hidden="true">✅</span>
+    <span class="agent-section-title">3 · Validation Agent — Sandbox Replay</span>
+    <span class="pill pill-muted pill-no-dot" id="validationPill">Awaiting recovery proposal</span>
+  </div>
+  <div class="agent-section-body" id="validationBody">
+    <div class="state-empty" style="padding:var(--sp-8) var(--sp-4);">
+      <div class="state-icon" aria-hidden="true">✅</div>
+      <div class="state-title">Validation Pending</div>
+      <div class="state-desc">The Validation Agent replays the proposed fix in the sandbox before approval.</div>
+    </div>
+  </div>
+  <div class="card-footer d-flex gap-3 align-center" id="validateFooter" style="display:none;">
+    <button class="btn btn-ai" id="btnValidate" aria-label="Run validation of proposed recovery in sandbox" disabled>
+      ▶ Run Validation
+    </button>
+  </div>
+</div>
+
+<!-- ── Approval Gate ── -->
+<div class="approval-controls" id="approvalControls" style="display:none;" role="region" aria-label="Human approval gate">
+  <span aria-hidden="true">⚠️</span>
+  <span class="approval-controls-label">
+    Human approval required before recovery execution.
+    The Governance Engine enforces authorization and sandbox limits.
+  </span>
+  <button class="btn btn-success btn-lg" id="btnApprove" aria-label="Approve the validated recovery plan" disabled>
+    ✓ Approve &amp; Enable Recovery
+  </button>
+  <button class="btn btn-danger" id="btnReject" aria-label="Reject the proposed recovery plan" disabled>
+    ✕ Reject
+  </button>
+</div>
+
+<!-- ── Recovery Execution ── -->
+<div class="agent-section" id="sectionRecover" style="opacity:0.4;pointer-events:none;">
+  <div class="agent-section-header">
+    <span class="agent-section-icon" aria-hidden="true">🚀</span>
+    <span class="agent-section-title">4 · Recovery Execution</span>
+    <span class="pill pill-muted pill-no-dot" id="recoverPill">Locked — approval required</span>
+  </div>
+  <div class="agent-section-body" id="recoverBody">
+    <div class="state-empty" style="padding:var(--sp-8) var(--sp-4);">
+      <div class="state-icon" aria-hidden="true">🔒</div>
+      <div class="state-title">Recovery Locked</div>
+      <div class="state-desc">Complete Validate → Approve steps to unlock recovery execution.</div>
+    </div>
+  </div>
+  <div class="card-footer" id="recoverFooter" style="display:none;">
+    <button class="btn btn-success btn-lg" id="btnRecover" aria-label="Execute approved recovery plan" disabled>
+      🚀 Execute Recovery
+    </button>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', filename='js/agents.js') }}"></script>
+{% endblock %}

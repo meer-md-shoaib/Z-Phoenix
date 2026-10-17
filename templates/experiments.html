@@ -1,0 +1,140 @@
+﻿{% extends "base.html" %}
+{% block title %}Chaos Lab{% endblock %}
+{% block topbar_title %}Chaos Lab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">⚗️ Chaos Lab</h1>
+      <p class="page-subtitle">Inject controlled fault scenarios into the sandbox — never touches production.</p>
+    </div>
+    <div class="d-flex align-center gap-3">
+      <span class="sim-label">🧪 SANDBOX ONLY</span>
+      <button class="btn btn-kill" id="btnKillSwitch" aria-label="Emergency kill-switch: stop all fault processes" disabled>
+        ⛔ KILL SWITCH
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Safety notice -->
+<div class="alert-banner alert-warning mb-6" role="note">
+  <span aria-hidden="true">⚠️</span>
+  <span class="alert-banner-text">
+    All faults run inside a <strong>sandboxed simulation</strong> with CPU and process caps. The LinuxONE host is protected by resource guard-rails. CICS/Db2 workload values are <strong>simulated</strong> — not live production mainframe data.
+  </span>
+</div>
+
+<!-- Fault status banner -->
+<div class="alert-banner alert-critical" id="faultActiveBanner" style="display:none;" role="alert" aria-live="assertive">
+  <span aria-hidden="true">🔥</span>
+  <span class="alert-banner-text" id="faultActiveBannerText">Fault active.</span>
+  <span class="alert-banner-time" id="faultActiveTime"></span>
+</div>
+
+<div class="grid-2">
+  <!-- Left: Scenario picker -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Select Fault Scenario</span>
+      <span class="pill pill-muted pill-no-dot" id="selectedScenarioLabel">None selected</span>
+    </div>
+    <div class="card-body">
+      <div class="scenario-cards-grid" id="scenarioGrid" role="radiogroup" aria-label="Fault scenario selection">
+
+        <label class="scenario-card" for="sc-cpu">
+          <input type="radio" id="sc-cpu" name="scenario" value="cpu_spike" checked>
+          <div class="scenario-card-title">💻 CPU Runaway Job</div>
+          <div class="scenario-card-desc">Simulates a runaway batch job causing CPU exhaustion. Correlates with TPS collapse and Db2 lock contention.</div>
+          <div class="scenario-card-risk">⚠ Risk: MEDIUM · Bounded by CPU cap · Sandbox only</div>
+        </label>
+
+        <label class="scenario-card" for="sc-lock">
+          <input type="radio" id="sc-lock" name="scenario" value="db2_lock_contention">
+          <div class="scenario-card-title">🔒 Db2 Lock Contention</div>
+          <div class="scenario-card-desc">Simulates Db2 lock chain creation causing transaction waits and TPS degradation.</div>
+          <div class="scenario-card-risk">⚠ Risk: MEDIUM · Simulated locks only · No real Db2 touched</div>
+        </label>
+
+        <label class="scenario-card" for="sc-mem">
+          <input type="radio" id="sc-mem" name="scenario" value="memory_pressure">
+          <div class="scenario-card-title">🧠 Memory Pressure</div>
+          <div class="scenario-card-desc">Simulates memory pressure causing paging behaviour. RAM guard-rail prevents OOM on host.</div>
+          <div class="scenario-card-risk">⚠ Risk: LOW · Capped at 3.5 GB · Host safe</div>
+        </label>
+
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Controls -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="faultDuration">Duration (seconds)</label>
+          <input type="range" id="faultDuration" min="10" max="120" value="30" step="5" aria-valuemin="10" aria-valuemax="120" aria-valuenow="30">
+          <div class="form-hint">Current: <strong id="durationDisplay">30</strong>s — Max 120s in sandbox</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="faultIntensity">Intensity</label>
+          <select class="form-control" id="faultIntensity" aria-label="Fault intensity level">
+            <option value="low">Low (demo safe)</option>
+            <option value="medium" selected>Medium (recommended)</option>
+            <option value="high">High (dramatic)</option>
+          </select>
+          <div class="form-hint">Bounded by sandbox limits regardless</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-footer d-flex justify-between align-center">
+      <span class="demo-label" id="chaosDemoLabel" style="display:none;">⚠ DEMO MODE — request not sent</span>
+      <span style="flex:1;"></span>
+      <div class="d-flex gap-3">
+        <button class="btn btn-ghost btn-sm" id="btnResetFault" aria-label="Reset fault scenario form">↺ Reset</button>
+        <button class="btn btn-danger btn-lg" id="btnStartFault" aria-label="Start selected fault scenario">
+          🔥 Start Fault
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Status and output -->
+  <div style="display:flex;flex-direction:column;gap:var(--sp-4);">
+
+    <!-- Fault status card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Fault Status</span>
+        <span class="pill pill-muted pill-no-dot" id="faultStatusPill">IDLE</span>
+      </div>
+      <div class="card-body">
+        <div id="faultStatusContent">
+          <div class="state-empty" style="padding:var(--sp-8) var(--sp-4);">
+            <div class="state-icon" aria-hidden="true">🟢</div>
+            <div class="state-title">System Healthy</div>
+            <div class="state-desc">No fault is currently active. Select a scenario and click Start Fault.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fault output log -->
+    <div class="card" style="flex:1;">
+      <div class="card-header">
+        <span class="card-title">Fault Log</span>
+        <button class="btn btn-ghost btn-sm" id="btnClearLog" aria-label="Clear fault log">Clear</button>
+      </div>
+      <div class="card-body" style="padding:0;max-height:240px;overflow-y:auto;">
+        <div id="faultLog" style="padding:var(--sp-4);font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.8;color:var(--clr-text-secondary);">
+          <span style="color:var(--clr-text-muted);">— Fault log ready —</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ url_for('static', filename='js/experiments.js') }}"></script>
+{% endblock %}

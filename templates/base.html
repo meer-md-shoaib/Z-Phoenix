@@ -1,0 +1,218 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Z-PHOENIX — AI-driven resilience platform for IBM Z mission-critical workloads. Practice failure safely. Learn recovery. Be ready when it matters.">
+  <title>{% block title %}Z-PHOENIX{% endblock %} | Resilience Platform</title>
+
+  <!-- Design system -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <!-- Chart.js via CDN (no build pipeline) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+
+  <!-- Socket.IO via CDN — loaded only when backend is available -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
+
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ── Sidebar overlay (mobile) ── -->
+  <div class="sidebar-overlay" id="sidebarOverlay" aria-hidden="true"></div>
+
+  <!-- ══════════════════════════════
+       SIDEBAR
+       ══════════════════════════════ -->
+  <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+    <!-- Brand -->
+    <a class="sidebar-brand" href="{{ url_for('dashboard') }}" aria-label="Z-PHOENIX Home">
+      <div class="sidebar-brand-icon" aria-hidden="true">⚡</div>
+      <div class="sidebar-brand-text">
+        <span class="sidebar-brand-name">Z-PHOENIX</span>
+        <span class="sidebar-brand-sub">Resilience Platform</span>
+      </div>
+    </a>
+
+    <!-- Navigation -->
+    <nav class="sidebar-nav" aria-label="Pages">
+      <div class="nav-section-label">Monitoring</div>
+
+      <a class="nav-link {% if active_page == 'dashboard' %}active{% endif %}"
+         href="{{ url_for('dashboard') }}"
+         aria-current="{% if active_page == 'dashboard' %}page{% endif %}">
+        <span class="nav-link-icon" aria-hidden="true">📊</span>
+        Command Center
+      </a>
+
+      <a class="nav-link {% if active_page == 'incidents' %}active{% endif %}"
+         href="{{ url_for('incidents') }}"
+         aria-current="{% if active_page == 'incidents' %}page{% endif %}">
+        <span class="nav-link-icon" aria-hidden="true">🚨</span>
+        Incidents
+      </a>
+
+      <div class="nav-section-label" style="margin-top:8px;">Engineering</div>
+
+      <a class="nav-link {% if active_page == 'experiments' %}active{% endif %}"
+         href="{{ url_for('experiments') }}"
+         aria-current="{% if active_page == 'experiments' %}page{% endif %}">
+        <span class="nav-link-icon" aria-hidden="true">⚗️</span>
+        Chaos Lab
+      </a>
+
+      <a class="nav-link {% if active_page == 'agents' %}active{% endif %}"
+         href="{{ url_for('agents') }}"
+         aria-current="{% if active_page == 'agents' %}page{% endif %}">
+        <span class="nav-link-icon" aria-hidden="true">🤖</span>
+        AI Agents
+      </a>
+
+      <div class="nav-section-label" style="margin-top:8px;">Governance</div>
+
+      <a class="nav-link {% if active_page == 'playbooks' %}active{% endif %}"
+         href="{{ url_for('playbooks') }}"
+         aria-current="{% if active_page == 'playbooks' %}page{% endif %}">
+        <span class="nav-link-icon" aria-hidden="true">📚</span>
+        Playbooks
+      </a>
+
+      <a class="nav-link {% if active_page == 'audit' %}active{% endif %}"
+         href="{{ url_for('audit') }}"
+         aria-current="{% if active_page == 'audit' %}page{% endif %}">
+        <span class="nav-link-icon" aria-hidden="true">🗒️</span>
+        Audit Log
+      </a>
+    </nav>
+
+    <!-- Sidebar footer: platform info -->
+    <div class="sidebar-footer">
+      <div style="font-size:var(--fs-xs);color:var(--clr-text-muted);line-height:1.6;">
+        <div style="font-weight:var(--fw-semibold);color:var(--clr-text-secondary);margin-bottom:4px;">IBM Z · LinuxONE</div>
+        <div>IBM Datathon 2026</div>
+        <div>v1.0 · Port 8080</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══════════════════════════════
+       MAIN AREA
+       ══════════════════════════════ -->
+  <div class="main-area">
+
+    <!-- ── Top Bar ── -->
+    <header class="topbar" role="banner">
+      <div class="topbar-left">
+        <!-- Mobile hamburger -->
+        <button class="hamburger" id="hamburgerBtn"
+                aria-label="Toggle navigation menu"
+                aria-controls="sidebar"
+                aria-expanded="false">☰</button>
+
+        <!-- Page breadcrumb title -->
+        <span class="topbar-page-title">{% block topbar_title %}Z-PHOENIX{% endblock %}</span>
+      </div>
+
+      <div class="topbar-right">
+        <!-- Last refresh time -->
+        <span class="last-updated" id="lastUpdatedTime" aria-live="polite" aria-label="Last data refresh time">—</span>
+
+        <!-- System incident state badge -->
+        <span class="incident-badge state-healthy" id="systemStateBadge" aria-live="assertive">
+          ● HEALTHY
+        </span>
+
+        <!-- Connection indicator -->
+        <span class="conn-indicator conn-demo" id="connIndicator" aria-live="polite">
+          <span class="conn-dot" aria-hidden="true"></span>
+          <span id="connLabel">DEMO MODE</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- ── Page Content ── -->
+    <main class="page-content" id="mainContent" role="main">
+      {% block content %}{% endblock %}
+    </main>
+
+  </div><!-- /.main-area -->
+
+</div><!-- /.app-shell -->
+
+<!-- ══════════════════════════════
+     SHARED MODAL AREA
+     ══════════════════════════════ -->
+<div class="modal-backdrop" id="globalModal" role="dialog" aria-modal="true" aria-labelledby="globalModalTitle" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="globalModalTitle">Details</h2>
+      <button class="modal-close" id="globalModalClose" aria-label="Close modal">×</button>
+    </div>
+    <div class="modal-body" id="globalModalBody">
+      <!-- Populated by JS -->
+    </div>
+    <div class="modal-footer" id="globalModalFooter">
+      <button class="btn btn-ghost" id="globalModalCancelBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     TOAST CONTAINER
+     ══════════════════════════════ -->
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-label="Notifications"></div>
+
+<!-- ══════════════════════════════
+     SHARED SCRIPTS
+     ══════════════════════════════ -->
+<script src="{{ url_for('static', filename='js/base.js') }}"></script>
+
+<!-- Page-specific scripts -->
+{% block page_scripts %}{% endblock %}
+
+<!-- Hamburger / sidebar toggle -->
+<script>
+(function() {
+  const hamburger = document.getElementById('hamburgerBtn');
+  const sidebar   = document.getElementById('sidebar');
+  const overlay   = document.getElementById('sidebarOverlay');
+  function toggleSidebar(open) {
+    const expanded = open !== undefined ? open : sidebar.classList.toggle('open');
+    if (expanded === undefined) expanded = sidebar.classList.contains('open');
+    hamburger.setAttribute('aria-expanded', String(sidebar.classList.contains('open')));
+    overlay.classList.toggle('open', sidebar.classList.contains('open'));
+    overlay.setAttribute('aria-hidden', String(!sidebar.classList.contains('open')));
+  }
+  hamburger.addEventListener('click', () => toggleSidebar());
+  overlay.addEventListener('click', () => { sidebar.classList.remove('open'); overlay.classList.remove('open'); hamburger.setAttribute('aria-expanded','false'); });
+
+  // Global modal helpers (accessible by page scripts via window.ZP.modal)
+  const modalBackdrop = document.getElementById('globalModal');
+  const modalClose    = document.getElementById('globalModalClose');
+  const modalCancel   = document.getElementById('globalModalCancelBtn');
+  function openModal(title, bodyHTML, footerHTML) {
+    document.getElementById('globalModalTitle').textContent = title;
+    document.getElementById('globalModalBody').innerHTML = bodyHTML;
+    if (footerHTML !== undefined) document.getElementById('globalModalFooter').innerHTML = footerHTML;
+    modalBackdrop.removeAttribute('hidden');
+    requestAnimationFrame(() => modalBackdrop.classList.add('open'));
+  }
+  function closeModal() {
+    modalBackdrop.classList.remove('open');
+    setTimeout(() => modalBackdrop.setAttribute('hidden', ''), 200);
+  }
+  [modalClose, modalCancel].forEach(b => b && b.addEventListener('click', closeModal));
+  modalBackdrop.addEventListener('click', e => { if (e.target === modalBackdrop) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  window.ZP = window.ZP || {};
+  window.ZP.openModal = openModal;
+  window.ZP.closeModal = closeModal;
+})();
+</script>
+
+</body>
+</html>
