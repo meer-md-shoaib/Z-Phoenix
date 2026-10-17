@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Z-PHOENIX{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/socket.io-client/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">Z</div>
+      <div>
+        <div class="brand-name">Z-PHOENIX</div>
+        <div class="brand-sub">LinuxONE · s390x</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-label">Operations</div>
+      <a href="/" class="{{ 'active' if request.path == '/' }}">
+        <span class="nav-dot"></span> Command Center
+      </a>
+      <a href="/chaos" class="{{ 'active' if request.path.startswith('/chaos') }}">
+        <span class="nav-dot"></span> Chaos Lab
+      </a>
+      <div class="nav-label">Governance</div>
+      <a href="/playbooks" class="{{ 'active' if request.path.startswith('/playbooks') }}">
+        <span class="nav-dot"></span> Playbook Library
+      </a>
+      <a href="/audit" class="{{ 'active' if request.path.startswith('/audit') }}">
+        <span class="nav-dot"></span> Audit Trail
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      IBM LinuxONE Community Cloud<br>
+      Ubuntu 24.04 · Python 3.12<br>
+      Granite 3.0 8B · 4.0s budget<br>
+      <span style="color:#8B5CF6">bounded autonomy enabled</span>
+    </div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <h1>{% block page_title %}Command Center{% endblock %}</h1>
+        <div class="crumb">{% block crumb %}Real-time resilience rehearsal console{% endblock %}</div>
+      </div>
+      <div class="topbar-right">
+        <span id="topbarFault" class="badge badge-ok">NO ACTIVE FAULT</span>
+        <button id="btnKillTop" class="btn btn-danger btn-sm" title="Emergency kill switch">KILL SWITCH</button>
+        <span id="connBadge" class="badge badge-crit">CONNECTING</span>
+        <span id="sysBadge" class="badge badge-ok">SYSTEM HEALTHY</span>
+        <span id="clock" class="clock">--:--:--</span>
+      </div>
+    </header>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="{{ url_for('static', filename='js/socket.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

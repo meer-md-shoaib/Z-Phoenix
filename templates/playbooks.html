@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Playbook Library · Z-PHOENIX{% endblock %}
+{% block page_title %}Playbook Library{% endblock %}
+{% block crumb %}Versioned remediation playbooks with 1-click ~2s fast replay{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Verified Playbooks <span class="chip chip-cyan">FAST REPLAY ≈ 2s</span></h2>
+    <div class="btn-row">
+      <button id="btnRefreshPlaybooks" class="btn btn-sm">REFRESH</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Version</th>
+          <th>Trigger Signature</th>
+          <th>Steps</th>
+          <th>Validation</th>
+          <th>Status</th>
+          <th>Approved By</th>
+          <th>Created</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="pbBody">
+        <tr><td colspan="10" class="mono">loading playbook library…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note" style="margin-top:16px">
+    Every approved execution stores its fix as <code>v(N+1)</code> for the same
+    trigger signature; the previous version remains traceable through the audit
+    trail. When the same fault is re-injected, the platform bypasses Granite
+    diagnosis entirely and re-executes the validated replay in ~2 seconds.
+  </p>
+</section>
+{% endblock %}

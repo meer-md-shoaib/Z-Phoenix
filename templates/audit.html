@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Audit Trail · Z-PHOENIX{% endblock %}
+{% block page_title %}Audit Trail{% endblock %}
+{% block crumb %}Immutable record of actors, decisions, risk tiers and payloads{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Live Audit Log <span class="chip chip-gold">APPEND-ONLY</span></h2>
+    <div class="btn-row">
+      <span class="footer-note">Rows stream in over WebSocket in real time</span>
+      <button id="btnRefreshAudit" class="btn btn-sm">REFRESH</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Actor</th>
+          <th>Action</th>
+          <th>Target</th>
+          <th>Risk</th>
+          <th>Details (JSON)</th>
+        </tr>
+      </thead>
+      <tbody id="auditBody">
+        <tr><td colspan="6" class="mono">loading audit trail…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note" style="margin-top:16px">
+    Risk tiers: <span class="badge badge-ok">LOW</span>
+    <span class="badge badge-warn">MEDIUM</span>
+    <span class="badge badge-crit">HIGH</span>
+    — every chaos injection, agent output, human gate decision, execution and
+    replay is recorded here before it can affect the LPAR.
+  </p>
+</section>
+{% endblock %}
