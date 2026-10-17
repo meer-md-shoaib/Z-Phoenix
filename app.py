@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import os
+import hmac
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -48,6 +50,7 @@ if not ASYNC_MODE:
 
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
+from werkzeug.exceptions import HTTPException
 
 import agents
 import attack
@@ -55,16 +58,23 @@ import config
 import database
 import governance
 import workload
+from services.workflow import WorkflowError, WorkflowService
 
 database.init_db()
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "z-phoenix-console"
+app.config["SECRET_KEY"] = os.environ.get("Z_PHOENIX_SECRET_KEY") or secrets.token_urlsafe(32)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
 app.config["JSON_SORT_KEYS"] = False
 
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    # Same-origin by default; deployments needing cross-origin access must
+    # configure an explicit trusted-origin list.
+    cors_allowed_origins=(
+        [origin.strip() for origin in os.environ["Z_PHOENIX_ALLOWED_ORIGINS"].split(",") if origin.strip()]
+        if os.environ.get("Z_PHOENIX_ALLOWED_ORIGINS") else None
+    ),
     async_mode=ASYNC_MODE,
     ping_interval=25,
     ping_timeout=60,
@@ -157,6 +167,67 @@ def _governance_audit_sink(entry: Dict[str, Any]) -> None:
 governance.set_audit_emitter(_governance_audit_sink)
 database.set_audit_sink(_governance_audit_sink)
 
+def _current_plan() -> tuple[Optional[int], Optional[Dict[str, Any]]]:
+    with _FLOW_LOCK:
+        incident_id = FLOW.get("incident_id")
+        proposal = FLOW.get("proposal")
+        validation = FLOW.get("validation")
+    pending = governance.get_pending()
+    if proposal is None:
+        proposal = pending.get("proposal")
+    if incident_id is None:
+        incident_id = pending.get("incident_id")
+    if proposal is None:
+        return incident_id, None
+    # The proposal is changed by validation, so bind the returned verdict too.
+    result = dict(proposal)
+    if validation:
+        result["validation_result"] = validation.get("result", "FAIL")
+    return incident_id, result
+
+
+def _complete_workflow(result: Dict[str, Any]) -> None:
+    incident_id = result.get("incident_id")
+    if incident_id:
+        database.resolve_incident(incident_id)
+    with _FLOW_LOCK:
+        FLOW["pipeline"] = "complete"
+        FLOW["incident_id"] = None
+        FLOW["incident"] = None
+    socketio.emit("incident_cleared", {"id": incident_id, "settled": True})
+    socketio.emit("stages", _flow_copy())
+
+
+workflow_service = WorkflowService(
+    current_plan=_current_plan,
+    sample=engine.sample,
+    complete=_complete_workflow,
+    set_stage=_set_stage,
+    logger=app.logger,
+)
+
+
+def _approval_auth_error():
+    expected = os.environ.get("Z_PHOENIX_APPROVAL_TOKEN", "")
+    supplied = request.headers.get("X-Z-Phoenix-Approval-Token", "")
+    if not expected:
+        return _error("Recovery approval is disabled: operator authentication is not configured.", 503)
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        return _error("Valid operator authentication is required.", 401)
+    return None
+
+
+def _actor(body: Dict[str, Any]) -> Optional[str]:
+    actor = body.get("actor")
+    if not isinstance(actor, str):
+        return None
+    actor = actor.strip()
+    return actor if 1 <= len(actor) <= 120 else None
+
+
+def _chaos_enabled() -> bool:
+    return os.environ.get("Z_PHOENIX_ENABLE_CHAOS", "").strip().lower() in ("1", "true", "yes")
+
 
 # ---------------------------------------------------------------------------
 # detection helpers
@@ -177,6 +248,47 @@ def healthy(sample: Dict[str, Any]) -> bool:
     return (sample["cpu"] <= config.RECOVERY_CPU_MAX
             and sample["tps"] >= config.RECOVERY_TPS_MIN
             and sample["locks"] <= config.RECOVERY_LOCKS_MAX)
+
+
+def _bind_allowlisted_playbook(proposal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Discard model-supplied actions and bind a proposal to a stored plan."""
+    fault = str(proposal.get("fault_type") or "").upper()
+    if fault not in config.SUPPORTED_FAULTS:
+        return None
+    playbook = database.find_playbook_by_trigger(fault)
+    if (not playbook
+            or str(playbook.get("status", "")).lower() not in ("verified", "approved", "active")
+            or str(playbook.get("validation_result", "")).upper() != "PASS"
+            or not playbook.get("approved_by")):
+        return None
+    try:
+        steps = json.loads(playbook.get("steps_json") or "[]")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(steps, list) or not steps:
+        return None
+    allowed, _ = governance.check_steps(steps)
+    if not allowed:
+        return None
+    bound = dict(proposal)
+    bound.update({
+        "matched_playbook_id": playbook["id"],
+        "matched_playbook_version": int(playbook["version"]),
+        "steps": steps,
+        "source": proposal.get("source", "deterministic-fallback"),
+    })
+    if bound.get("reason"):
+        bound["dependency_status"] = "fallback"
+        bound.pop("reason", None)
+    return bound
+
+
+def _sanitize_agent_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove provider exception text before storage, audit, or HTTP output."""
+    safe = dict(result)
+    if safe.pop("reason", None):
+        safe["dependency_status"] = "fallback"
+    return safe
 
 
 def _open_incident(sample: Dict[str, Any], reasons: List[str]) -> None:
@@ -305,7 +417,10 @@ def _ai_pipeline(incident_id: int, sample: Dict[str, Any], fault: str) -> None:
         FLOW["pipeline"] = "diagnosing"
     _set_stage(4, "running", "IBM Granite analysing telemetry (4 s budget)")
 
-    diagnosis = agents.diagnose(sample, fault)
+    diagnosis = _sanitize_agent_result(agents.diagnose(sample, fault))
+    governance.log_audit("analysis.api", "ANALYSIS_COMPLETED", str(incident_id or ""), "LOW",
+                         {"fault_type": fault, "source": diagnosis.get("source"),
+                          "simulated_telemetry": True})
     database.update_incident(incident_id, diagnosis=json.dumps(diagnosis))
     _emit_agent("diagnosis", diagnosis)
     source = diagnosis.get("source", "deterministic-fallback")
@@ -318,7 +433,14 @@ def _ai_pipeline(incident_id: int, sample: Dict[str, Any], fault: str) -> None:
         FLOW["diagnosis"] = diagnosis
     _set_stage(5, "running", "Drafting structured remediation (proposal-only)")
 
-    proposal = agents.recover(diagnosis, sample)
+    proposal = _bind_allowlisted_playbook(agents.recover(diagnosis, sample))
+    if proposal is None:
+        governance.log_audit("recovery.api", "PROPOSAL_BLOCKED", str(incident_id), "HIGH",
+                             {"reason": "no approved allowlisted playbook for fault"})
+        _set_stage(5, "error", "No approved allowlisted playbook matches this fault")
+        with _FLOW_LOCK:
+            FLOW["pipeline"] = "rejected"
+        return
     proposal["validation_result"] = "PENDING"
     try:
         governance.stage_proposal(proposal, incident_id)
@@ -395,8 +517,9 @@ def _telemetry_loop() -> None:
                 "chaos": attack.status(),
                 "stages": _flow_copy(),
             })
-        except Exception as exc:  # the stream must never die
-            _console("error", f"telemetry loop error: {type(exc).__name__}: {exc}")
+        except Exception as exc:  # the stream must never die or echo provider data
+            app.logger.error("telemetry loop failed (%s)", type(exc).__name__)
+            _console("error", "Telemetry sampling failed; the stream will retry.")
 
 
 def _start_background_tasks() -> None:
@@ -438,9 +561,39 @@ def _error(message: str, status: int):
     return jsonify({"ok": False, "error": message, "status": status}), status
 
 
+@app.errorhandler(HTTPException)
+def _http_error(exc: HTTPException):
+    return _error(exc.description, exc.code or 400)
+
+
+@app.errorhandler(Exception)
+def _unexpected_error(exc: Exception):
+    app.logger.error("request failed (%s)", type(exc).__name__)
+    return _error("Request could not be completed.", 500)
+
+
 def _json_body() -> Dict[str, Any]:
     payload = request.get_json(silent=True)
-    return payload if isinstance(payload, dict) else {}
+    if payload is None and not request.data:
+        return {}
+    if not isinstance(payload, dict):
+        from werkzeug.exceptions import BadRequest
+        raise BadRequest("Request body must be a JSON object.")
+    return payload
+
+
+@app.route("/api/health")
+def api_health():
+    try:
+        with database.connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        app.logger.error("database readiness check failed (%s)", type(exc).__name__)
+        return jsonify({"ok": False, "status": "not_ready",
+                        "dependencies": {"database": "unavailable"}}), 503
+    return jsonify({"ok": True, "status": "ready", "app": config.APP_NAME,
+                    "dependencies": {"database": "ready"},
+                    "chaos_enabled": _chaos_enabled()})
 
 
 @app.route("/api/telemetry")
@@ -449,6 +602,12 @@ def api_telemetry():
     return jsonify({
         "ok": True,
         "telemetry": sample,
+        "telemetry_source": {
+            "host_cpu_ram": "host-observed" if sample.get("real_cpu") is not None or sample.get("real_ram_gb") is not None else "simulated-fallback",
+            "cics_tps": "simulated",
+            "db2_locks": "simulated",
+            "fault_metrics": "simulated" if sample.get("chaos_active") else "baseline-simulation",
+        },
         "chaos": attack.status(),
         "stages": _flow_copy(),
         "incident": _flow_copy()["incident"],
@@ -475,13 +634,44 @@ def api_status():
         "async_mode": ASYNC_MODE,
         "model": config.GRANITE_MODEL,
         "granite_timeout_sec": config.GRANITE_TIMEOUT,
-        "api_key_present": config.api_key_present(),
-        "db_path": config.DB_PATH,
+        "ai_provider_configured": config.api_key_present(),
+        "chaos_enabled": _chaos_enabled(),
     })
+
+
+@app.route("/api/attack", methods=["POST"])
+def api_attack():
+    if not _chaos_enabled():
+        return _error("Chaos simulation is disabled by default; enable it explicitly in server configuration.", 403)
+    auth_error = _approval_auth_error()
+    if auth_error:
+        return auth_error
+    body = _json_body()
+    scenario = body.get("scenario", body.get("fault_type"))
+    if not isinstance(scenario, str) or scenario.upper().strip() not in config.SUPPORTED_FAULTS:
+        return _error("scenario must identify a supported bounded simulation.", 400)
+    intensity = body.get("intensity", config.CHAOS_DEFAULT_INTENSITY)
+    if isinstance(intensity, bool) or not isinstance(intensity, (int, float)) or not config.CHAOS_MIN_INTENSITY <= intensity <= config.CHAOS_MAX_INTENSITY:
+        return _error("intensity is outside the configured safety limits.", 400)
+    try:
+        result = attack.inject(scenario.upper().strip(), intensity)
+    except ValueError:
+        return _error("Unsupported chaos scenario.", 400)
+    except Exception as exc:
+        app.logger.error("chaos simulation failed (%s)", type(exc).__name__)
+        return _error("Chaos simulation could not be started.", 503)
+    governance.log_audit("chaos.api", "SIMULATION_STARTED", scenario.upper().strip(), "MEDIUM",
+                         {"intensity": result.get("intensity"), "simulation_only": True})
+    return jsonify({"ok": True, "simulation_only": True, "chaos": result}), 202
 
 
 @app.route("/api/chaos/inject", methods=["POST"])
 def api_chaos_inject():
+    if not _chaos_enabled():
+        return _error("Chaos simulation is disabled by default; enable it explicitly in server configuration.", 403)
+    auth_error = _approval_auth_error()
+    if auth_error:
+        return auth_error
     body = _json_body()
     fault = str(body.get("fault_type") or "").upper()
     intensity = body.get("intensity", config.CHAOS_DEFAULT_INTENSITY)
@@ -490,7 +680,8 @@ def api_chaos_inject():
     except ValueError as exc:
         return _error(str(exc), 400)
     except Exception as exc:
-        return _error(f"chaos injection failed: {type(exc).__name__}: {exc}", 500)
+        app.logger.error("legacy chaos injection failed (%s)", type(exc).__name__)
+        return _error("Chaos simulation could not be started.", 503)
 
     governance.log_audit("chaos.lab", "CHAOS_INJECT", fault, "MEDIUM",
                          {"intensity": result.get("intensity"),
@@ -515,13 +706,15 @@ def api_chaos_stop():
 
 
 @app.route("/api/diagnose", methods=["POST"])
+@app.route("/api/analyze", methods=["POST"])
 def api_diagnose():
+    _json_body()
     sample = engine.sample()
     fault = sample.get("fault") or "UNKNOWN"
     with _FLOW_LOCK:
         incident_id = FLOW["incident_id"]
     _set_stage(4, "running", "IBM Granite analysing telemetry (4 s budget)")
-    diagnosis = agents.diagnose(sample, fault)
+    diagnosis = _sanitize_agent_result(agents.diagnose(sample, fault))
     if incident_id:
         database.update_incident(incident_id, diagnosis=json.dumps(diagnosis))
     with _FLOW_LOCK:
@@ -543,6 +736,7 @@ def api_diagnose():
 
 @app.route("/api/propose", methods=["POST"])
 def api_propose():
+    _json_body()
     sample = engine.sample()
     with _FLOW_LOCK:
         incident_id = FLOW["incident_id"]
@@ -553,7 +747,11 @@ def api_propose():
         diagnosis = FLOW["diagnosis"] or agents.diagnose(sample, fault)
     if diagnosis.get("fault_type") == "NONE" or str(diagnosis.get("risk", "")).upper() == "LOW":
         return _error("Diagnosis indicates healthy baseline; no recovery proposal required.", 400)
-    proposal = agents.recover(diagnosis, sample)
+    proposal = _bind_allowlisted_playbook(agents.recover(diagnosis, sample))
+    if proposal is None:
+        governance.log_audit("recovery.api", "PROPOSAL_BLOCKED", str(incident_id or ""), "HIGH",
+                             {"reason": "no approved allowlisted playbook for fault"})
+        return _error("No approved allowlisted playbook matches this incident.", 409)
     try:
         governance.stage_proposal(proposal, incident_id)
     except governance.ApprovalError as exc:
@@ -571,59 +769,76 @@ def api_propose():
 
 @app.route("/api/validate", methods=["POST"])
 def api_validate():
+    body = _json_body()
     with _FLOW_LOCK:
         proposal = FLOW["proposal"] or governance.get_pending().get("proposal")
     if not proposal:
         return _error("No proposal to validate - run the Recovery Agent first.", 409)
+    requested_incident = body.get("incident_id")
+    incident_id, _ = _current_plan()
+    if requested_incident is not None and requested_incident != incident_id:
+        return _error("Validation incident does not match the pending plan.", 409)
     validation = agents.validate(proposal)
+    validation = _sanitize_agent_result(validation)
+    verdict = str(validation.get("result", "FAIL")).upper()
+    if verdict not in ("PASS", "FAIL"):
+        verdict = "FAIL"
+        validation["result"] = verdict
     with _FLOW_LOCK:
         FLOW["validation"] = validation
     _emit_agent("validation", validation)
-    verdict = validation.get("result", "FAIL")
     proposal["validation_result"] = verdict
     governance.update_pending_validation(verdict)
+    governance.log_audit("validation.api", "PLAN_VALIDATED", str(_current_plan()[0] or ""),
+                         "LOW" if verdict == "PASS" else "HIGH",
+                         {"result": verdict, "commands_checked": validation.get("commands_checked", 0)})
     _console("ok" if verdict == "PASS" else "error",
              f"[VALIDATION] sandbox verdict: {verdict}")
     _set_stage(6, "done", f"Sandbox verdict: {verdict}")
-    _set_stage(7, "gate", "AWAITING HUMAN APPROVAL - AI cannot self-execute")
-    return jsonify({"ok": True, "validation": validation})
+    approval_id = None
+    if verdict == "PASS":
+        incident_id, bound_proposal = _current_plan()
+        approval_id = workflow_service.approval_id(incident_id, bound_proposal or {})
+        _set_stage(7, "gate", "AWAITING AUTHENTICATED HUMAN APPROVAL - recovery remains separate")
+    else:
+        _set_stage(7, "blocked", "Validation failed; approval and recovery are disabled")
+    return jsonify({"ok": verdict == "PASS", "validation": validation,
+                    "approval_id": approval_id, "incident_id": _current_plan()[0]}), (200 if verdict == "PASS" else 422)
 
 
 @app.route("/api/approve", methods=["POST"])
 def api_approve():
-    actor = str(_json_body().get("actor") or "sre.oncall")
     try:
-        governance.approve(actor)
-        result = governance.execute(actor)
-    except governance.ApprovalError as exc:
-        _console("error", f"APPROVAL BLOCKED ({exc.status}): {exc}")
+        result = workflow_service.approve(
+            _json_body(), request.headers.get("X-Z-Phoenix-Approval-Token", ""))
+    except WorkflowError as exc:
         return _error(str(exc), exc.status)
-    _set_stage(7, "done", f"Approved by {result.get('approved_by')}")
-    _set_stage(8, "done", f"Stored {result['playbook_id']} "
-                          f"v{result['playbook_version']} in "
-                          f"{result['elapsed_ms']} ms")
-    if result.get("incident_id"):
-        database.resolve_incident(result["incident_id"])
-    with _FLOW_LOCK:
-        FLOW["pipeline"] = "complete"
-        FLOW["incident_id"] = None
-        FLOW["incident"] = None
-    socketio.emit("incident_cleared", {"id": result.get("incident_id"),
-                                       "settled": True})
-    socketio.emit("stages", _flow_copy())
-    _console("ok", f"APPROVED + EXECUTED in {result['elapsed_ms']} ms. "
-                   f"Chaos cleared, metrics restored, fix stored as "
-                   f"{result['playbook_id']} v{result['playbook_version']}.")
-    return jsonify(result)
+    return jsonify(result), 200
+
+
+@app.route("/api/recover", methods=["POST"])
+def api_recover():
+    try:
+        result = workflow_service.recover(
+            _json_body(), request.headers.get("X-Z-Phoenix-Approval-Token", ""))
+    except WorkflowError as exc:
+        return _error(str(exc), exc.status)
+    return jsonify(result), 200
 
 
 @app.route("/api/reject", methods=["POST"])
 def api_reject():
-    actor = str(_json_body().get("actor") or "sre.oncall")
+    auth_error = _approval_auth_error()
+    if auth_error:
+        return auth_error
+    actor = _actor(_json_body())
+    if actor is None:
+        return _error("actor is required and must be 1 to 120 characters.", 400)
     try:
         result = governance.reject(actor)
     except governance.ApprovalError as exc:
         return _error(str(exc), exc.status)
+    workflow_service.clear_approval()
     with _FLOW_LOCK:
         FLOW["pipeline"] = "rejected"
     _set_stage(7, "pending", f"REJECTED by {actor} - proposal discarded, "
@@ -635,30 +850,28 @@ def api_reject():
 
 @app.route("/api/execute", methods=["POST"])
 def api_execute():
-    """Direct execution is always blocked without a recorded human approval."""
-    actor = str(_json_body().get("actor") or "sre.oncall")
-    try:
-        result = governance.execute(actor)
-    except governance.ApprovalError as exc:
-        _console("error", f"EXECUTION BLOCKED ({exc.status}): {exc}")
-        return _error(str(exc), exc.status)
-    _set_stage(7, "done", f"Approved by {result.get('approved_by')}")
-    _set_stage(8, "done", f"Stored {result['playbook_id']} "
-                          f"v{result['playbook_version']}")
-    with _FLOW_LOCK:
-        FLOW["pipeline"] = "complete"
-        FLOW["incident_id"] = None
-        FLOW["incident"] = None
-    socketio.emit("stages", _flow_copy())
-    _console("ok", f"EXECUTED: {result['playbook_id']} v{result['playbook_version']}")
-    return jsonify(result)
+    """Compatibility alias for the separately authorized recovery action."""
+    return api_recover()
 
 
 @app.route("/api/replay/<playbook_ref>", methods=["POST"])
 def api_replay(playbook_ref):
+    auth_error = _approval_auth_error()
+    if auth_error:
+        return auth_error
+    body = _json_body()
+    actor = _actor(body)
+    if actor is None:
+        return _error("actor is required and must be 1 to 120 characters.", 400)
+    stored_playbook = (database.get_playbook(playbook_ref)
+                       or database.find_playbook_by_trigger(playbook_ref))
+    if (stored_playbook is None
+            or str(stored_playbook.get("validation_result", "")).upper() != "PASS"
+            or not stored_playbook.get("approved_by")):
+        return _error("Legacy replay requires a previously approved, validated playbook.", 403)
     started = time.perf_counter()
     try:
-        result = governance.replay(playbook_ref, actor="sre.replay")
+        result = governance.replay(playbook_ref, actor=actor)
     except governance.ApprovalError as exc:
         return _error(str(exc), exc.status)
     with _FLOW_LOCK:
@@ -679,12 +892,60 @@ def api_replay(playbook_ref):
                    f"{result['elapsed_ms']} ms (AI bypassed).")
     result["api_elapsed_ms"] = int((time.perf_counter() - started) * 1000)
     result["incident_closed"] = had_incident
+    result["simulation_only"] = True
+    result["mode"] = "bounded-simulation"
+    result["steps_simulated"] = result.pop("steps_executed", 0)
+    result.pop("command_log", None)
+    return jsonify(result)
+
+
+@app.route("/api/replay", methods=["POST"])
+def api_replay_safe():
+    body = _json_body()
+    if set(body) - {"playbook_id", "mode"}:
+        return _error("Replay accepts only playbook_id and mode.", 400)
+    if body.get("mode", "safe") != "safe":
+        return _error("Only safe, side-effect-free replay mode is supported by this endpoint.", 400)
+    playbook_id = body.get("playbook_id")
+    if not isinstance(playbook_id, str) or not 1 <= len(playbook_id) <= 32:
+        return _error("playbook_id is required.", 400)
+    playbook = database.get_playbook(playbook_id)
+    if not playbook:
+        return _error("Playbook was not found.", 404)
+    if (str(playbook.get("status", "")).lower() not in ("verified", "approved", "active")
+            or str(playbook.get("validation_result", "")).upper() != "PASS"
+            or not playbook.get("approved_by")):
+        return _error("Replay requires a previously approved, validated playbook.", 403)
+    try:
+        steps = json.loads(playbook.get("steps_json") or "[]")
+    except (TypeError, ValueError):
+        return _error("Playbook contains invalid step data.", 422)
+    if not isinstance(steps, list) or not steps:
+        return _error("Playbook has no replayable steps.", 422)
+    allowed, reason = governance.check_steps(steps)
+    if not allowed:
+        governance.log_audit("replay.api", "REPLAY_BLOCKED", playbook_id, "HIGH", {"reason": reason})
+        return _error("Playbook failed the action allowlist check.", 422)
+    result = {
+        "ok": True, "mode": "safe-simulation", "simulation_only": True,
+        "playbook_id": playbook["id"], "playbook_version": playbook["version"],
+        "trigger_signature": playbook["trigger_signature"],
+        "steps_checked": len(steps), "commands_executed": 0,
+        "events": [{"order": step.get("order", index + 1),
+                    "action_id": f"{playbook['id']}:{step.get('order', index + 1)}",
+                    "result": "would_apply_in_simulation"}
+                   for index, step in enumerate(steps)],
+    }
+    governance.log_audit("replay.api", "SAFE_REPLAY_COMPLETED", playbook_id, "LOW",
+                         {"steps_checked": len(steps), "side_effects": False})
     return jsonify(result)
 
 
 @app.route("/api/incidents")
 def api_incidents():
-    limit = int(request.args.get("limit", 50))
+    limit = _query_limit("limit", 50, 200)
+    if isinstance(limit, tuple):
+        return limit
     return jsonify({"ok": True, "incidents": database.list_incidents(limit)})
 
 
@@ -698,19 +959,131 @@ def api_incident(incident_id):
 
 @app.route("/api/playbooks")
 def api_playbooks():
-    playbooks = database.list_playbooks()
-    for playbook in playbooks:
+    playbooks = []
+    for candidate in database.list_playbooks():
+        if (str(candidate.get("status", "")).lower() not in ("verified", "approved", "active")
+                or str(candidate.get("validation_result", "")).upper() != "PASS"
+                or not candidate.get("approved_by")):
+            continue
         try:
-            playbook["steps"] = json.loads(playbook.get("steps_json") or "[]")
+            steps = json.loads(candidate.get("steps_json") or "[]")
         except (ValueError, TypeError):
-            playbook["steps"] = []
+            continue
+        if not isinstance(steps, list) or not steps:
+            continue
+        allowed, _ = governance.check_steps(steps)
+        if not allowed:
+            continue
+        candidate["steps"] = steps
+        playbooks.append(candidate)
+    for playbook in playbooks:
+        playbook["action_ids"] = [
+            f"{playbook.get('id')}:{step.get('order', index + 1)}"
+            for index, step in enumerate(playbook["steps"])
+        ]
+        playbook["simulation_only"] = True
+        playbook["match_metadata"] = {
+            "trigger_signature": playbook.get("trigger_signature"),
+            "validated": True,
+            "approved_by": playbook.get("approved_by"),
+            "safe_replay_available": True,
+        }
     return jsonify({"ok": True, "playbooks": playbooks})
+
+
+def _query_limit(name: str, default: int, maximum: int):
+    try:
+        limit = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return _error(f"{name} must be an integer.", 400)
+    if limit < 1 or limit > maximum:
+        return _error(f"{name} must be between 1 and {maximum}.", 400)
+    return limit
+
+
+def _audit_details(entry: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        details = json.loads(entry.get("details_json") or "{}")
+    except (TypeError, ValueError):
+        details = {}
+    if not isinstance(details, dict):
+        details = {}
+    # Responses contain only the event fields used by the console/API.
+    return {"id": entry.get("id"), "ts": entry.get("ts"),
+            "actor": entry.get("actor"), "action": entry.get("action"),
+            "target": entry.get("target"), "risk_level": entry.get("risk_level"),
+            "details": {key: value for key, value in details.items()
+                        if not any(part in key.lower() for part in ("secret", "token", "password", "credential", "api_key"))}}
+
+
+def _event_incident_id(entry: Dict[str, Any]) -> Optional[int]:
+    details = _audit_details(entry).get("details", {})
+    try:
+        return int(details.get("incident_id")) if details.get("incident_id") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/recovery_passport/<int:passport_id>")
+def api_recovery_passport(passport_id: int):
+    incident = database.get_incident(passport_id)
+    if incident is None:
+        return _error("Recovery Passport was not found.", 404)
+    try:
+        telemetry = json.loads(incident.get("telemetry_snapshot") or "{}")
+    except (TypeError, ValueError):
+        telemetry = {}
+    try:
+        analysis = json.loads(incident.get("diagnosis") or "null")
+    except (TypeError, ValueError):
+        analysis = None
+    audit_rows = [_audit_details(row) for row in database.list_audit(500)
+                  if _event_incident_id(row) == passport_id]
+    snapshot_event = next((row for row in audit_rows
+                           if row["action"] == "RECOVERY_SNAPSHOTS_CAPTURED"), None)
+    approved = next((row for row in audit_rows if row["action"] == "HUMAN_GATE_APPROVED"), None)
+    outcome = "recovered" if str(incident.get("status", "")).upper() == "RESOLVED" else "pending_or_unresolved"
+    playbook = database.find_playbook_by_trigger(incident.get("fault_type", ""))
+    return jsonify({"ok": True, "passport": {
+        "id": str(passport_id), "incident_id": passport_id,
+        "evidence": {"telemetry_snapshot": telemetry,
+                     "telemetry_source": "host-observed CPU/RAM where available; CICS/Db2 simulated"},
+        "analysis": analysis,
+        "matched_playbook": ({"id": playbook.get("id"), "version": playbook.get("version"),
+                              "trigger_signature": playbook.get("trigger_signature")}
+                             if playbook else None),
+        "validation_and_approval": {"approval_event": approved,
+                                    "approval_time": approved.get("ts") if approved else None},
+        "outcome": outcome,
+        "snapshots": {
+            "before": ((snapshot_event or {}).get("details", {}).get("before") or telemetry),
+            "after": (snapshot_event or {}).get("details", {}).get("after"),
+            "after_status": "captured_in_audit" if snapshot_event else "unavailable",
+        },
+        "audit_links": [row["id"] for row in audit_rows],
+        "audit": audit_rows,
+    }})
 
 
 @app.route("/api/audit")
 def api_audit():
-    limit = int(request.args.get("limit", 200))
-    return jsonify({"ok": True, "audit": database.list_audit(limit)})
+    limit = _query_limit("limit", 200, 500)
+    if isinstance(limit, tuple):
+        return limit
+    incident_arg = request.args.get("incident_id")
+    if incident_arg is not None:
+        try:
+            incident_id = int(incident_arg)
+            if incident_id < 1:
+                raise ValueError
+        except ValueError:
+            return _error("incident_id must be a positive integer.", 400)
+    else:
+        incident_id = None
+    entries = database.list_audit(limit)
+    if incident_id is not None:
+        entries = [entry for entry in entries if _event_incident_id(entry) == incident_id]
+    return jsonify({"ok": True, "audit": [_audit_details(entry) for entry in entries]})
 
 
 @app.route("/api/pending")

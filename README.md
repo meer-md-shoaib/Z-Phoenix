@@ -349,3 +349,51 @@ All results must be reported honestly, distinguishing completed features from ta
 ---
 
 **Z-PHOENIX — Practice failure safely. Learn recovery. Be ready when it matters.**
+
+## Backend API and local operation
+
+Install the packages in `requirements.txt`, then start the service with `python app.py`. The default listener is configured by `config.py` for the project demo environment. The SQLite database is initialized on startup; set `Z_PHOENIX_DB` to choose a different database file.
+
+### Configuration
+
+| Variable | Purpose | Default behavior |
+|---|---|---|
+| `Z_PHOENIX_APPROVAL_TOKEN` | Shared operator credential required by approval, rejection, and recovery requests. Send it as `X-Z-Phoenix-Approval-Token`. | Unset disables approvals and recovery (HTTP 503). |
+| `Z_PHOENIX_ENABLE_CHAOS` | Enables the bounded CPU simulation through the chaos endpoints. | Disabled. |
+| `Z_PHOENIX_SECRET_KEY` | Flask session signing key. | Random per process; set a persistent secret for deployments that use sessions. |
+| `Z_PHOENIX_ALLOWED_ORIGINS` | Comma-separated Socket.IO origins trusted for cross-origin clients. | Same-origin only. |
+| `Z_PHOENIX_DB` | SQLite database path. | Project-local SQLite database. |
+| `GROQ_API_KEY`, `HF_API_TOKEN` | Optional credentials for the configured AI provider. | Deterministic agent fallback is used when unavailable. |
+
+Do not put secrets in source control, request bodies, audit details, or logs. The `actor` field is an operator-supplied audit label; production deployments must connect it to SSO or another identity provider before relying on individual attribution.
+
+### API contracts
+
+All responses are JSON. Errors use `{"ok": false, "error": "...", "status": <HTTP status>}`. JSON request bodies must be objects and are limited to 16 KiB. List limits are bounded to prevent unbounded reads.
+
+| Method and path | Request | Success | Common failures |
+|---|---|---|---|
+| `GET /api/health` | None | `200`: readiness and database dependency state | `503`: database unavailable |
+| `GET /api/telemetry` | Optional | `200`: sample, chaos state, workflow, and per-metric source labels | `500`: unexpected service failure |
+| `POST /api/attack` | `{"scenario":"CPU_RUNAWAY","intensity":60}` plus operator token when enabled | `202`: bounded simulation marked `simulation_only` | `400`: unsupported scenario/range; `401`: bad token; `403`: disabled by default; `503`: worker or auth configuration unavailable |
+| `POST /api/analyze` | `{}`; analyzes current telemetry | `200`: diagnosis and incident reference | `400`: malformed JSON; `500`: service failure |
+| `POST /api/validate` | Optional `{"incident_id":1}` | `200`: PASS and plan-bound `approval_id`; `422`: failed validation | `409`: no plan; `400`: malformed JSON |
+| `POST /api/approve` | `{"actor":"operator","incident_id":1,"approval_id":"..."}` plus `X-Z-Phoenix-Approval-Token` | `200`: approval recorded only; includes expiry | `401`: invalid credential; `403`: stale/missing approval; `409`: plan or incident mismatch; `503`: credential not configured |
+| `POST /api/recover` | Same actor, incident, and `approval_id` as approval, plus the same header | `200`: simulated recovery, audit and playbook persistence | `401/403`: authentication or approval gate; `409`: validation/plan mismatch; `500`: recovery failure |
+| `GET /api/playbooks` | Optional | `200`: approved, validated playbooks with action IDs and matching metadata | `500`: storage unavailable |
+| `POST /api/replay` | `{"playbook_id":"PB-001","mode":"safe"}` | `200`: allowlist-checked simulation; `commands_executed` is always `0` | `400`: invalid mode/body; `403`: unapproved playbook; `404`: unknown playbook; `422`: invalid steps |
+| `GET /api/recovery_passport/{incident_id}` | Incident identifier | `200`: derived passport containing recorded evidence, diagnosis, approval events, outcome and audit links | `404`: unknown incident |
+| `GET /api/audit?limit=100&incident_id=1` | Optional bounded filters (`limit` 1–500) | `200`: filtered audit records with sensitive-key fields omitted | `400`: invalid filters |
+
+`POST /api/approve` records approval only; it never executes recovery. The frontend sends the configured token in `X-Z-Phoenix-Approval-Token`, then makes a separate `POST /api/recover` with the same approval ID, incident ID, actor label, and token. Approval expires after five minutes, is consumed once, and is invalidated by a plan change or service restart. The command-center frontend follows this two-request contract. See [docs/backend-frontend-contract.md](docs/backend-frontend-contract.md) for request examples, response handling, and error behavior.
+
+### Integration boundaries and limitations
+
+- Host CPU/RAM are observed where the platform probe is available. CICS TPS, Db2 lock counts, and fault responses are simulated; the API labels these sources explicitly.
+- Chaos injection starts bounded local worker processes when enabled. It is disabled unless `Z_PHOENIX_ENABLE_CHAOS=true` is set.
+- Read-only GET routes are unauthenticated in this demo. Put them behind a trusted network boundary or authentication proxy before exposing the service beyond the local rehearsal environment. The emergency chaos stop stays available without a credential so an operator can always stop simulation workers.
+- Recovery playbook steps are simulated and audited. This backend does not invoke shell commands or execute AI-produced code.
+- `POST /api/replay` is side-effect-free and only reports what the validated steps would do. The older `/api/replay/{playbook_ref}` route requires the operator token and a previously approved playbook, changes only in-process simulation state, and does not execute stored command strings.
+- Recovery Passport responses are assembled from incident and audit records rather than a dedicated passport table. New bounded recoveries record before/after telemetry snapshots in the audit log; older incidents without those records are labeled as unavailable.
+- Operator authentication is a shared token, not per-user identity. LinuxONE deployment still needs secret provisioning, trusted network/TLS termination, and SSO/identity binding for `actor` values. No live LinuxONE, Db2, or CICS adapter is configured or claimed here.
+- The database/governance, telemetry/chaos, AI, and frontend modules remain owned by their assigned teammates. Changes to their adapters or UI contract should be coordinated with those owners.

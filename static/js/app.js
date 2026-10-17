@@ -11,6 +11,12 @@
   var Z = window.ZPhoenix;
   var pendingProposal = null;
   var lastValidation = null;
+  var approvalContext = null;
+
+  function approvalToken() {
+    var input = $("approvalToken");
+    return input ? input.value.trim() : "";
+  }
 
   function $(id) { return document.getElementById(id); }
 
@@ -332,6 +338,10 @@
     Z.api("/api/validate", { method: "POST", body: {} })
       .then(function (data) {
         lastValidation = data.validation;
+        approvalContext = data.ok ? {
+          approval_id: data.approval_id,
+          incident_id: data.incident_id
+        } : null;
         renderValidation(data.validation);
         Z.toast("Sandbox verdict: " + data.validation.result,
                 data.validation.result === "PASS" ? "ok" : "error");
@@ -340,24 +350,58 @@
   });
 
   bind("btnApprove", function () {
+    var token = approvalToken();
+    if (!token) {
+      handleError(new Error("Enter the configured operator token first."), "Approval failed");
+      return;
+    }
+    if (!approvalContext || !approvalContext.approval_id || approvalContext.incident_id == null) {
+      handleError(new Error("Validate the current plan successfully before approval."), "Approval failed");
+      return;
+    }
     disableGateButtons(true);
-    setGate("EXECUTING", "Approved - executing validated remediation...");
-    Z.api("/api/approve", { method: "POST", body: { actor: "sre.oncall" } })
+    setGate("APPROVING", "Recording approval; recovery has not started.");
+    var approvalRecorded = false;
+    var requestBody = {
+      actor: "sre.oncall",
+      incident_id: approvalContext.incident_id,
+      approval_id: approvalContext.approval_id
+    };
+    Z.api("/api/approve", { method: "POST", body: requestBody, approvalToken: token })
       .then(function (data) {
-        setGate("EXECUTED", data.playbook_id + " v" + data.playbook_version
-          + " stored · recovered in " + data.elapsed_ms + " ms");
-        Z.toast("Approved + executed. Playbook " + data.playbook_id
-          + " v" + data.playbook_version + " stored.", "ok");
+        approvalRecorded = true;
+        setGate("APPROVED", "Approval recorded. Sending the separate recovery request...");
+        Z.toast("Approval recorded; recovery is a separate request.", "warn");
+        return Z.api("/api/recover", {
+          method: "POST", body: requestBody, approvalToken: token
+        });
+      })
+      .then(function (result) {
+        approvalContext = null;
+        setGate("RECOVERED", result.playbook_id + " v" + result.playbook_version
+          + " · simulated recovery completed");
+        Z.toast("Simulated recovery completed. Playbook " + result.playbook_id
+          + " v" + result.playbook_version + " stored.", "ok");
       })
       .catch(function (err) {
+        if (approvalRecorded) {
+          setGate("APPROVAL RECORDED", "Recovery did not complete. Review status before retrying.");
+        } else {
+          setGate("APPROVAL FAILED", "No recovery request was sent.");
+        }
         disableGateButtons(false);
-        handleError(err, "Approval failed");
+        handleError(err, "Approval or recovery failed");
       });
   });
 
   bind("btnReject", function () {
+    var token = approvalToken();
+    if (!token) {
+      handleError(new Error("Enter the configured operator token first."), "Reject failed");
+      return;
+    }
     disableGateButtons(true);
-    Z.api("/api/reject", { method: "POST", body: { actor: "sre.oncall" } })
+    Z.api("/api/reject", { method: "POST", body: { actor: "sre.oncall" }, approvalToken: token })
       .then(function () {
         setGate("REJECTED", "Nothing was executed. Chaos remains active.");
         Z.toast("Proposal rejected - nothing executed", "warn");

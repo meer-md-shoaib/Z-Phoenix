@@ -109,10 +109,13 @@
     <div class="gate-head">Human Approval Gate · Bounded Autonomy</div>
     <p>
       The AI can diagnose, propose and validate — it can never execute.
-      Direct execution without an operator decision is rejected with
-      <code>HTTP 403</code>. Approving clears the chaos fault, restores the
-      metrics and stores the fix as playbook <code>v(N+1)</code>.
+      Approval records the human decision; recovery is a separate request.
+      The configured operator token is sent in the request header and is never
+      included in the JSON body.
     </p>
+    <label class="kv" for="approvalToken">Operator approval token</label>
+    <input id="approvalToken" type="password" autocomplete="off" spellcheck="false"
+      aria-label="Operator approval token" placeholder="Enter configured token for this session">
     <div class="row">
       <span class="badge badge-gate" id="gateState">IDLE</span>
       <span class="footer-note" id="gateDetail">No proposal is waiting at the gate.</span>

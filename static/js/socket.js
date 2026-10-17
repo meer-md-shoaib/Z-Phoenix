@@ -40,6 +40,9 @@
         method: options.method || (options.body ? "POST" : "GET"),
         headers: { "Content-Type": "application/json" }
       };
+      if (options.approvalToken) {
+        init.headers["X-Z-Phoenix-Approval-Token"] = options.approvalToken;
+      }
       if (options.body) init.body = JSON.stringify(options.body);
       return fetch(path, init).then(function (response) {
         return response.json().catch(function () { return {}; }).then(function (data) {
