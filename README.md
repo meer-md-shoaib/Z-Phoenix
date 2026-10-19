@@ -687,6 +687,6 @@ Z-PHOENIX was developed with a dedication to safety, ethical AI governance, and 
 
 **🔥 Z-PHOENIX — Practice failure safely. Learn recovery. Be ready when it matters.**
 
-Made with ❤️ by the **Z-PHOENIX Engineering Team**
+Made by the **Z-PHOENIX Engineering Team**
 
 </div>
